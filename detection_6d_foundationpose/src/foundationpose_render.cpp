@@ -851,26 +851,12 @@ FoundationPoseRenderer::RenderAndTransform(
   }
 
   // 3. 根据poses和tfs渲染rgb图像和xyz_map，并Transpose后填充至目标缓存
-  if (render_static_result_buffer_device_ == nullptr) {
-    // 3.1 如果没有设置静态poses，跑一次渲染流程
-    CHECK_STATE(RenderProcess(cuda_stream_render_,
-                              poses,
-                              tfs,
-                              input_poses_device_.get(),
-                              render_buffer),
-                "[FoundationPose Renderer] RenderProcess Failed!!!");
-  } else {
-    // 3.2 如果设置了静态poses，直接将静态poses渲染结果拷贝到输入缓存中
-    const size_t render_result_buffer_byte_size 
-                      = input_poses_num * crop_window_H_ * crop_window_W_ * kNumChannels * 2 * sizeof(float);
-    CHECK_CUDA(cudaMemcpyAsync(render_buffer,
-                              render_static_result_buffer_device_.get(),
-                              render_result_buffer_byte_size,
-                              cudaMemcpyDeviceToDevice,
-                              cuda_stream_render_),
-              "[FoundationPose Renderer] Set static poses, but memcpy render results FAILED!!!");
-  }
-
+  CHECK_STATE(RenderProcess(cuda_stream_render_,
+                            poses,
+                            tfs,
+                            input_poses_device_.get(),
+                            render_buffer),
+              "[FoundationPose Renderer] RenderProcess Failed!!!");
 
   // 4. 根据poses和tfs裁剪输入rgb和xyz_map，并Transpose后填充至目标缓存
   CHECK_STATE(TransfProcess(cuda_stream_transf_,
