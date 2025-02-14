@@ -86,7 +86,7 @@
 
 ## TODO
 
--[ ] 添加用户输入的管控逻辑，目前默认输入`rgb/depth/masks`的宽高为`640x480`
+- [ ] 添加用户输入的管控逻辑，目前默认输入`rgb/depth/masks`的宽高为`640x480`
 
 ## References
 
