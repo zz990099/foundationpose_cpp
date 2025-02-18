@@ -447,9 +447,7 @@ FoundationPoseRenderer::LoadTexturedMesh()
   const auto& rgb_texture_map = mesh_loader_->GetTextureMap();
   mesh_diameter_ = mesh_loader_->GetMeshDiameter();
 
-  std::vector<float> vertices_;
-  std::vector<float> texcoords_;
-  std::vector<int32_t> mesh_faces_;
+
   // Walk through each of the mesh's vertices
   for (unsigned int v = 0; v < mesh_vertices.size(); v++) {
     vertices_.push_back(mesh_vertices[v].x - mesh_model_center[0]);
@@ -459,7 +457,7 @@ FoundationPoseRenderer::LoadTexturedMesh()
     // Check if the mesh has texture coordinates
     if (mesh_texcoords.size() >= 1) {
       texcoords_.push_back(mesh_texcoords[0][v].x);
-      texcoords_.push_back(mesh_texcoords[0][v].y);
+      texcoords_.push_back(1 - mesh_texcoords[0][v].y);
     }
   }
 
