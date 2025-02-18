@@ -15,7 +15,7 @@
 
 运行公开数据`mustard`模型检测结果:
 
-| <img src="./assets/mustard.png" alt="1" width="500"> |
+| <img src="./assets/test_foundationpose_track.gif" alt="1" width="500"> |
 |:----------------------------------------:|
 | **foundationpose(fp16) test result on nvidia-4060-8G**  |
 
