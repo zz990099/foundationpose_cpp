@@ -7,6 +7,7 @@
 
 #include "detection_6d_foundationpose/foundationpose.hpp"
 #include "trt_core/trt_core.h"
+#include "tests/fs_util.hpp"
 
 using namespace inference_core;
 using namespace detection_6d;
@@ -150,11 +151,32 @@ TEST(foundationpose_test, test)
   draw3DBoundingBox(intrinsic_in_mat, out_pose, 480, 640, object_dimension, regist_plot);
   cv::imwrite("/workspace/test_data/test_foundationpose_plot.png", regist_plot);
 
-  Eigen::Matrix4f track_pose;
-  foundation_pose->Track(rgb.clone(), depth, demo_name_, track_pose);
-  cv::Mat track_plot = rgb.clone();
-  draw3DBoundingBox(intrinsic_in_mat, track_pose, 480, 640, object_dimension, track_plot);
-  cv::imwrite("/workspace/test_data/test_foundationpose_track_plot.png", track_plot);
+  auto rgb_paths = get_files_in_directory(demo_data_path_ + "/rgb/");
+  std::sort(rgb_paths.begin(), rgb_paths.end());
+
+  std::vector<std::string> frame_ids;
+  for (const auto& rgb_path : rgb_paths) {
+    frame_ids.push_back(rgb_path.stem());
+  }
+
+  LOG(WARNING) << "first Pose : " << out_pose;
+
+  int total = frame_ids.size();
+  for (int i = 1 ; i < total ; ++ i) {
+    std::string cur_rgb_path = demo_data_path_ + "/rgb/" + frame_ids[i] + ".png";
+    std::string cur_depth_path = demo_data_path_ + "/depth/" + frame_ids[i] + ".png";
+    cv::Mat cur_rgb = cv::imread(cur_rgb_path);
+    cv::Mat cur_depth = cv::imread(cur_depth_path, cv::IMREAD_UNCHANGED);
+
+
+    Eigen::Matrix4f track_pose;
+    foundation_pose->Track(cur_rgb.clone(), cur_depth, demo_name_, track_pose);
+    LOG(WARNING) << "Track pose : " << track_pose;
+    cv::Mat track_plot = cur_rgb.clone();
+    draw3DBoundingBox(intrinsic_in_mat, track_pose, 480, 640, object_dimension, track_plot);
+    cv::imwrite("/workspace/test_data/res/test_foundationpose_track_plot_" + frame_ids[i] + ".png", track_plot);
+  }
+
 }
 
 
