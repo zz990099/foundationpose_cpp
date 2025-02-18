@@ -7,6 +7,7 @@
 
 #include "detection_6d_foundationpose/foundationpose.hpp"
 #include "trt_core/trt_core.h"
+#include "tests/fs_util.hpp"
 
 using namespace inference_core;
 using namespace detection_6d;
@@ -94,6 +95,44 @@ Eigen::Matrix3f ReadCamK(const std::string& cam_K_path)
   return K;
 }
 
+void saveVideo(const std::vector<cv::Mat>& frames, const std::string& outputPath, double fps = 30.0) {
+    if (frames.empty()) {
+        std::cerr << "Error: No frames to write!" << std::endl;
+        return;
+    }
+
+    // 获取帧的宽度和高度
+    int frameWidth = frames[0].cols;
+    int frameHeight = frames[0].rows;
+    
+    // 定义视频编码格式（MP4 使用 `cv::VideoWriter::fourcc('m', 'p', '4', 'v')` 或 `cv::VideoWriter::fourcc('H', '2', '6', '4')`）
+    int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');  // MPEG-4 编码
+    // int fourcc = cv::VideoWriter::fourcc('H', '2', '6', '4'); // H.264 编码（可能需要额外的编解码器支持）
+
+    // 创建 VideoWriter 对象
+    cv::VideoWriter writer(outputPath, fourcc, fps, cv::Size(frameWidth, frameHeight));
+
+    // 检查是否成功打开
+    if (!writer.isOpened()) {
+        std::cerr << "Error: Could not open the video file for writing!" << std::endl;
+        return;
+    }
+
+    // 写入所有帧
+    for (const auto& frame : frames) {
+        // 确保所有帧大小一致
+        if (frame.cols != frameWidth || frame.rows != frameHeight) {
+            std::cerr << "Error: Frame size mismatch!" << std::endl;
+            break;
+        }
+        writer.write(frame);
+    }
+
+    // 释放资源
+    writer.release();
+    std::cout << "Video saved successfully: " << outputPath << std::endl;
+}
+
 TEST(foundationpose_test, test) 
 {
   auto refiner_core = CreateTrtInferCore(refiner_engine_path_,
@@ -150,11 +189,36 @@ TEST(foundationpose_test, test)
   draw3DBoundingBox(intrinsic_in_mat, out_pose, 480, 640, object_dimension, regist_plot);
   cv::imwrite("/workspace/test_data/test_foundationpose_plot.png", regist_plot);
 
-  Eigen::Matrix4f track_pose;
-  foundation_pose->Track(rgb.clone(), depth, demo_name_, track_pose);
-  cv::Mat track_plot = rgb.clone();
-  draw3DBoundingBox(intrinsic_in_mat, track_pose, 480, 640, object_dimension, track_plot);
-  cv::imwrite("/workspace/test_data/test_foundationpose_track_plot.png", track_plot);
+  auto rgb_paths = get_files_in_directory(demo_data_path_ + "/rgb/");
+  std::sort(rgb_paths.begin(), rgb_paths.end());
+
+  std::vector<std::string> frame_ids;
+  for (const auto& rgb_path : rgb_paths) {
+    frame_ids.push_back(rgb_path.stem());
+  }
+
+  LOG(WARNING) << "first Pose : " << out_pose;
+
+  int total = frame_ids.size();
+  std::vector<cv::Mat> result_image_sequence {regist_plot};
+  for (int i = 1 ; i < total ; ++ i) {
+    std::string cur_rgb_path = demo_data_path_ + "/rgb/" + frame_ids[i] + ".png";
+    std::string cur_depth_path = demo_data_path_ + "/depth/" + frame_ids[i] + ".png";
+    cv::Mat cur_rgb = cv::imread(cur_rgb_path);
+    cv::Mat cur_depth = cv::imread(cur_depth_path, cv::IMREAD_UNCHANGED);
+
+
+    Eigen::Matrix4f track_pose;
+    foundation_pose->Track(cur_rgb.clone(), cur_depth, demo_name_, track_pose);
+    LOG(WARNING) << "Track pose : " << track_pose;
+    cv::Mat track_plot = cur_rgb.clone();
+    draw3DBoundingBox(intrinsic_in_mat, track_pose, 480, 640, object_dimension, track_plot);
+    cv::imshow("test_foundationpose_result", track_plot);
+    cv::waitKey(20);
+    result_image_sequence.push_back(track_plot);
+  }
+
+  saveVideo(result_image_sequence, "/workspace/test_data/test_foundationpose_result.mp4");
 }
 
 

@@ -83,7 +83,9 @@ private:
 
   // mesh
   std::shared_ptr<TexturedMeshLoader> mesh_loader_;
-
+  std::vector<float> vertices_;
+  std::vector<float> texcoords_;
+  std::vector<int32_t> mesh_faces_;
   Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> mesh_vertices_;
   int num_vertices_;
   int num_faces_;
