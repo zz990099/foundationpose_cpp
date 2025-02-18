@@ -15,9 +15,13 @@
 
 运行公开数据`mustard`模型检测结果:
 
+| <img src="./assets/test_foundationpose_register.png" alt="1" width="500"> |
+|:----------------------------------------:|
+| **foundationpose(fp16) Register test result**  |
+
 | <img src="./assets/test_foundationpose_track.gif" alt="1" width="500"> |
 |:----------------------------------------:|
-| **foundationpose(fp16) test result on nvidia-4060-8G**  |
+| **foundationpose(fp16) Track test result**  |
 
 以下是在`nvidia-4060-8G`, `i5-12600kf`硬件上执行结果
 
