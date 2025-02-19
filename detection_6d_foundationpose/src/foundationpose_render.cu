@@ -262,4 +262,38 @@ void texture(
   cudaLaunchKernel(func, gridSize, blockSize, args, 0, stream);
 }
 
+__global__ void transform_points_kernel(
+    const float* transform_matrixs, int M, const float* points_vectors, 
+    int N, float* transformed_points_vectors)
+{
+  int row_idx = threadIdx.y + blockIdx.y * blockDim.y;
+  int col_idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (row_idx >= M || col_idx >= N) return;
+
+  const float* matrix = transform_matrixs + row_idx * 16;  // 指向当前 4x4 变换矩阵
+  const float* point = points_vectors + col_idx * 3;       // 指向当前 3D 点
+  float* transformed_point = transformed_points_vectors + (row_idx * N + col_idx) * 3;
+
+  float x = point[0], y = point[1], z = point[2];
+  // **Column-Major 访问方式**
+  transformed_point[0] = matrix[0] * x + matrix[4] * y + matrix[8]  * z + matrix[12];
+  transformed_point[1] = matrix[1] * x + matrix[5] * y + matrix[9]  * z + matrix[13];
+  transformed_point[2] = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
+}
+
+uint16_t ceil_div(uint16_t numerator, uint16_t denominator) {
+  uint32_t accumulator = numerator + denominator - 1;
+  return accumulator / denominator + 1;
+}
+
+void transform_points(cudaStream_t stream, const float* transform_matrixs, int M, const float* points_vectors, 
+    int N, float* transformed_points_vectors)
+{
+  dim3 blockSize = {32, 32};
+  dim3 gridSize = {ceil_div(N, 32), ceil_div(M, 32)};
+
+  transform_points_kernel<<<gridSize, blockSize, 0, stream>>>(
+      transform_matrixs, M, points_vectors, N, transformed_points_vectors);
+}
+
 }   // namespace foundationpose_render

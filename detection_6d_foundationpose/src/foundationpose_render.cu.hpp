@@ -53,7 +53,10 @@ void interpolate(
 void texture(
     cudaStream_t stream, float* tex_ptr, float* uv_ptr, float* out, int tex_height, int tex_width, int tex_channel,
     int tex_depth, int H, int W, int N);
-    
+
+void transform_points(cudaStream_t stream, const float* transform_matrixs, int transform_num, const float* points_vectors, 
+    int points_num, float* transformed_points_vectors);
+
 }   // namespace foundationpose_render
 
 #endif  // NVIDIA_ISAAC_ROS_EXTENSIONS_FOUNDATIONPOSE_RENDER_CUDA_HPP_

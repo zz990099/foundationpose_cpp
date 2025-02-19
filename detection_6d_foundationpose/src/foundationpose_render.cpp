@@ -131,8 +131,6 @@ bool TransformPts(std::vector<RowMajorMatrix>& output,
   return true;
 }
 
-
-
 bool ConstructBBox2D(Eigen::MatrixXf& bbox2d, 
                     const std::vector<RowMajorMatrix>& tfs, 
                     int H, int W) 
@@ -498,13 +496,18 @@ FoundationPoseRenderer::LoadTexturedMesh()
           vertices_.data(), num_vertices_, 3);
   
   // Allocate device memory for mesh data
+  size_t vertices_size = vertices_.size() * sizeof(float);
   size_t faces_size = mesh_faces_.size() * sizeof(int32_t);
   size_t texcoords_size = texcoords_.size() * sizeof(float);
 
-
+  float* _vertices_device;
   float* _texcoords_device;
   int32_t* _mesh_faces_device;
   uint8_t* _texture_map_device;
+
+  CHECK_CUDA(cudaMalloc(&_vertices_device, vertices_size),
+            "[FoundationposeRender] cudaMalloc `mesh_faces_device` FAILED!!!");
+  vertices_device_ = DeviceBufferUniquePtrType<float>(_vertices_device, CudaMemoryDeleter<float>());
 
   CHECK_CUDA(cudaMalloc(&_mesh_faces_device, faces_size),
             "[FoundationposeRender] cudaMalloc `mesh_faces_device` FAILED!!!");
@@ -518,7 +521,11 @@ FoundationPoseRenderer::LoadTexturedMesh()
             "[FoundationposeRender] cudaMalloc `texture_map_device_` FAILED!!!");
   texture_map_device_ = DeviceBufferUniquePtrType<uint8_t>(_texture_map_device, CudaMemoryDeleter<uint8_t>());
 
-
+  CHECK_CUDA(cudaMemcpy(vertices_device_.get(), 
+                        vertices_.data(), 
+                        vertices_size, 
+                        cudaMemcpyHostToDevice),
+            "[FoundationposeRender] cudaMemcpy mesh_faces_host -> mesh_faces_device FAILED!!!");
   CHECK_CUDA(cudaMemcpy(mesh_faces_device_.get(), 
                         mesh_faces_.data(), 
                         faces_size, 
@@ -550,6 +557,40 @@ FoundationPoseRenderer::LoadTexturedMesh()
   return true;  
 }
 
+bool FoundationPoseRenderer::TransformVerticesOnCUDA(cudaStream_t stream,
+                  const std::vector<Eigen::MatrixXf>& tfs,
+                  float* output_buffer) 
+{
+  // Get the dimensions of the inputs
+  int tfs_size = tfs.size();
+  CHECK_STATE(tfs_size != 0,
+        "[FoundationposeRender] The transfomation matrix is empty! ");
+
+  CHECK_STATE(tfs[0].cols() == tfs[0].rows(),
+        "[FoundationposeRender] The transfomation matrix has different rows and cols! ");
+
+  const int total_elements = tfs[0].cols() * tfs[0].rows();
+
+  float* transform_device_buffer_ = nullptr;
+  cudaMallocAsync(&transform_device_buffer_, tfs_size * total_elements * sizeof(float), stream);
+
+  for (int i = 0 ; i < tfs_size ; ++ i) {
+    cudaMemcpyAsync(transform_device_buffer_ + i * total_elements, 
+                    tfs[i].data(), 
+                    total_elements * sizeof(float), 
+                    cudaMemcpyHostToDevice, 
+                    stream);
+  }
+
+  foundationpose_render::transform_points(stream, 
+                                          transform_device_buffer_, 
+                                          tfs_size, 
+                                          vertices_device_.get(), 
+                                          num_vertices_, 
+                                          output_buffer);
+  return true;
+}
+
 
 bool 
 FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream, 
@@ -561,28 +602,11 @@ FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream,
                                         nvcv::Tensor& flip_xyz_map_tensor) 
 {
   size_t N = poses.size();
-  // Generate attributes for interpolate
-  std::vector<RowMajorMatrix> pts_cam;
-  CHECK_STATE(TransformPts(pts_cam, mesh_vertices_, poses),
-        "[FoundationposeRender] TransformPts Failed!!!");
+  CHECK_STATE(TransformVerticesOnCUDA(cuda_stream, poses, pts_cam_device_.get()),
+              "[FoundationPoseRender] Failed transform mesh vertices points !!!");
 
-  CHECK_STATE(pts_cam.size() != 0 && pts_cam.size() == N,
-        "[FoundationposeRender] The attribute size doesn't match pose size after transform");
 
-  CHECK_STATE(pts_cam[0].rows() == num_vertices_,
-        "[FoundationposeRender] The attribute dimension doesn't match with vertices after transform");
 
-  // Vector of Eigen matrix is not continous in memory, flatten matrix and insert to vector
-  size_t num_attr = pts_cam[0].cols();
-  CHECK_STATE(pts_cam[0].IsRowMajor,
-        "[FoundationposeRender] Pts cam need to be row major in order to copy into device memory");
-
-  std::vector<float> pts_cam_vector;
-  pts_cam_vector.reserve(N * num_vertices_ * num_attr);
-  for (auto& mat : pts_cam) {
-    std::vector<float> mat_data(mat.data(), mat.data() + mat.size());
-    pts_cam_vector.insert(pts_cam_vector.end(), mat_data.begin(), mat_data.end());
-  }
 
   Eigen::Matrix4f projection_mat;
   CHECK_STATE(ProjectMatrixFromIntrinsics(projection_mat, K, rgb_H, rgb_W),
@@ -596,7 +620,6 @@ FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream,
   CHECK_STATE(pose_homo.cols() == mesh_vertices_.cols() + 1,
         "[FoundationposeRender] Points per vertex should increase by one after homogeneliaze");
 
-
   std::vector<float> pose_clip;
   CHECK_STATE(GeneratePoseClip(pose_clip, poses, bbox2d, pose_homo, projection_mat, rgb_H, rgb_W),
         "[FoundationPoseRender] GeneratePoseClip Failed!!!");
@@ -604,11 +627,8 @@ FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream,
   CHECK_STATE(pose_clip.size() != 0,
         "[FoundationposeRender] Pose clip should not be empty");
 
-
-
   // Allocate device memory for the intermedia results on the first frame
   size_t pose_clip_size = pose_clip.size() * sizeof(float);
-  size_t pts_cam_size = pts_cam_vector.size() * sizeof(float);
 
   // Copy other data to device memory
   CHECK_CUDA(cudaMemcpyAsync(pose_clip_device_.get(), 
@@ -617,12 +637,10 @@ FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream,
                             cudaMemcpyHostToDevice, 
                             cuda_stream),
             "[FoundationPoseRenderer] cudaMemcpyAsync pose_clip host->device failed!!!");
-  CHECK_CUDA(cudaMemcpyAsync(pts_cam_device_.get(), 
-                            pts_cam_vector.data(), 
-                            pts_cam_size, 
-                            cudaMemcpyHostToDevice, 
-                            cuda_stream),
-            "[FoundationPoseRenderer] cudaMemcpyAsync pts_cam host->device failed!!!");
+
+
+
+
 
   foundationpose_render::rasterize(
       cuda_stream, cr_.get(),
