@@ -53,7 +53,24 @@ void interpolate(
 void texture(
     cudaStream_t stream, float* tex_ptr, float* uv_ptr, float* out, int tex_height, int tex_width, int tex_channel,
     int tex_depth, int H, int W, int N);
-    
+
+/**
+ * @param transform_matrixs 应当是`Col-Major`的transform_num个4x4矩阵
+ * @param points_vectors 应当是`points_num`个3x1向量
+ * @param transformed_points_vectors 输出3x1大小的向量缓存, 共 `transform_num x points_num` 个
+ */
+void transform_points(cudaStream_t stream, const float* transform_matrixs, int transform_num, const float* points_vectors, 
+    int points_num, float* transformed_points_vectors);
+
+/**
+ * @param transform_matrixs 应当是`Col-Major`的transform_num个4x4矩阵
+ * @param bbox2d_matrixs 应当是`Row-Major`的transform_num个矩阵，大小为[transform_num, 4]
+ * @param points_vectors 应当是`points_num`个3x1向量
+ * @param transformed_points_vectors 输出4x1大小的向量缓存, 共 `transform_num x points_num` 个
+ */
+void generate_pose_clip(cudaStream_t stream, const float* transform_matrixs, const float* bbox2d_matrix, int transform_num, const float* points_vectors, 
+    int points_num, float* transformed_points_vectors, int rgb_H, int rgb_W);
+
 }   // namespace foundationpose_render
 
 #endif  // NVIDIA_ISAAC_ROS_EXTENSIONS_FOUNDATIONPOSE_RENDER_CUDA_HPP_

@@ -87,7 +87,7 @@ ComputeCropWindowTF(const std::vector<Eigen::MatrixXf>& poses,
 
 
 /**
- * @brief TODO: 非常耗时，运行在cpu，252 * 0.3
+ * @brief 
  * 
  * @param output 
  * @param pts 
@@ -131,9 +131,7 @@ bool TransformPts(std::vector<RowMajorMatrix>& output,
   return true;
 }
 
-
-
-bool ConstructBBox2D(Eigen::MatrixXf& bbox2d, 
+bool ConstructBBox2D(RowMajorMatrix& bbox2d, 
                     const std::vector<RowMajorMatrix>& tfs, 
                     int H, int W) 
 {
@@ -155,8 +153,7 @@ bool ConstructBBox2D(Eigen::MatrixXf& bbox2d,
   }
 
   for (size_t i = 0; i < bbox2d_ori_vec.size(); i++) {
-    bbox2d.row(i) =
-        Eigen::Map<Eigen::RowVectorXf>(bbox2d_ori_vec[i].data(), bbox2d_ori_vec[i].size());
+    bbox2d.row(i) = Eigen::Map<Eigen::RowVectorXf>(bbox2d_ori_vec[i].data(), bbox2d_ori_vec[i].size());
   }
   return true;
 }
@@ -197,87 +194,6 @@ bool ProjectMatrixFromIntrinsics(Eigen::Matrix4f& proj_output,
 
   return true;
 }
-
-
-// Adding one column of ones to the matrix
-Eigen::MatrixXf ToHomo(const Eigen::MatrixXf& pts) {
-  int rows = pts.rows();
-  int cols = pts.cols();
-
-  Eigen::MatrixXf ones = Eigen::MatrixXf::Ones(rows, 1);
-
-  Eigen::MatrixXf homo(rows, cols + 1);
-  homo << pts, ones;
-
-  return homo;
-}
-
-
-
-/**
- * @brief TODO: 第二个for循环部分耗时非常高，运行在cpu上，252次循环*0.3ms
- * 
- * @param pose_clip 
- * @param poses 
- * @param bbox2d 
- * @param pose_homo 
- * @param projection_mat 
- * @param rgb_H 
- * @param rgb_W 
- * @return true 
- * @return false 
- */
-bool GeneratePoseClip(std::vector<float>& pose_clip, 
-                      const std::vector<Eigen::MatrixXf>& poses, 
-                      const Eigen::MatrixXf& bbox2d, 
-                      const Eigen::MatrixXf& pose_homo,
-                      const Eigen::Matrix4f& projection_mat, 
-                      int rgb_H, int rgb_W) 
-{
-  std::vector<Eigen::Matrix4f> mtx;
-  for (const auto& pose : poses) {
-    mtx.push_back(projection_mat * (kGLCamInCVCam * pose));
-  }
-
-  if (mtx[0].cols() != pose_homo.cols()) {
-    LOG(ERROR) << "[FoundationposeRender] The col size of mtx is not the same as pos_home";
-    return false;
-  }
-
-  Eigen::VectorXf l = bbox2d.col(0).array();
-  Eigen::VectorXf t = rgb_H - bbox2d.col(1).array();
-  Eigen::VectorXf r = bbox2d.col(2).array();
-  Eigen::VectorXf b = rgb_H - bbox2d.col(3).array();
-
-
-  int N = poses.size();
-  pose_clip.reserve(N * pose_homo.rows() * pose_homo.cols());
-  for (size_t i = 0; i < poses.size(); i++) {
-    auto m = mtx[i];
-    // Make sure eigen matrix is row major if need to copy into GPU memory
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> new_pos;
-    new_pos.resize(pose_homo.rows(), pose_homo.cols());
-    for (int j = 0; j < pose_homo.rows(); j++) {
-      Eigen::VectorXf temp = m * pose_homo.row(j).transpose();
-      new_pos.row(j) = temp.transpose();
-    }
-
-    Eigen::Matrix4f tf = Eigen::Matrix4f::Identity();
-    tf(0, 0) = rgb_W / (r(i) - l(i));
-    tf(1, 1) = rgb_H / (t(i) - b(i));
-    tf(3, 0) = (rgb_W - r(i) - l(i)) / (r(i) - l(i));
-    tf(3, 1) = (rgb_H - t(i) - b(i)) / (t(i) - b(i));
-    new_pos = new_pos * tf;
-    // Vector of Eigen matrix is not continous in memory, flatten matrix and insert to vector
-    std::vector<float> pose_data(new_pos.data(), new_pos.data() + new_pos.size());
-    pose_clip.insert(pose_clip.end(), pose_data.begin(), pose_data.end());
-  }
-
-
-  return true;
-}
-
-
 
 void WrapImgPtrToNHWCTensor(
     uint8_t* input_ptr, nvcv::Tensor& output_tensor, int N, int H, int W, int C) {
@@ -498,13 +414,18 @@ FoundationPoseRenderer::LoadTexturedMesh()
           vertices_.data(), num_vertices_, 3);
   
   // Allocate device memory for mesh data
+  size_t vertices_size = vertices_.size() * sizeof(float);
   size_t faces_size = mesh_faces_.size() * sizeof(int32_t);
   size_t texcoords_size = texcoords_.size() * sizeof(float);
 
-
+  float* _vertices_device;
   float* _texcoords_device;
   int32_t* _mesh_faces_device;
   uint8_t* _texture_map_device;
+
+  CHECK_CUDA(cudaMalloc(&_vertices_device, vertices_size),
+            "[FoundationposeRender] cudaMalloc `mesh_faces_device` FAILED!!!");
+  vertices_device_ = DeviceBufferUniquePtrType<float>(_vertices_device, CudaMemoryDeleter<float>());
 
   CHECK_CUDA(cudaMalloc(&_mesh_faces_device, faces_size),
             "[FoundationposeRender] cudaMalloc `mesh_faces_device` FAILED!!!");
@@ -518,7 +439,11 @@ FoundationPoseRenderer::LoadTexturedMesh()
             "[FoundationposeRender] cudaMalloc `texture_map_device_` FAILED!!!");
   texture_map_device_ = DeviceBufferUniquePtrType<uint8_t>(_texture_map_device, CudaMemoryDeleter<uint8_t>());
 
-
+  CHECK_CUDA(cudaMemcpy(vertices_device_.get(), 
+                        vertices_.data(), 
+                        vertices_size, 
+                        cudaMemcpyHostToDevice),
+            "[FoundationposeRender] cudaMemcpy mesh_faces_host -> mesh_faces_device FAILED!!!");
   CHECK_CUDA(cudaMemcpy(mesh_faces_device_.get(), 
                         mesh_faces_.data(), 
                         faces_size, 
@@ -550,79 +475,111 @@ FoundationPoseRenderer::LoadTexturedMesh()
   return true;  
 }
 
+bool FoundationPoseRenderer::TransformVerticesOnCUDA(cudaStream_t stream,
+                  const std::vector<Eigen::MatrixXf>& tfs,
+                  float* output_buffer) 
+{
+  // Get the dimensions of the inputs
+  int tfs_size = tfs.size();
+  CHECK_STATE(tfs_size != 0,
+        "[FoundationposeRender] The transfomation matrix is empty! ");
+
+  CHECK_STATE(tfs[0].cols() == tfs[0].rows(),
+        "[FoundationposeRender] The transfomation matrix has different rows and cols! ");
+
+  const int total_elements = tfs[0].cols() * tfs[0].rows();
+
+  float* transform_device_buffer_ = nullptr;
+  cudaMallocAsync(&transform_device_buffer_, tfs_size * total_elements * sizeof(float), stream);
+
+  for (int i = 0 ; i < tfs_size ; ++ i) {
+    cudaMemcpyAsync(transform_device_buffer_ + i * total_elements, 
+                    tfs[i].data(), 
+                    total_elements * sizeof(float), 
+                    cudaMemcpyHostToDevice, 
+                    stream);
+  }
+
+  foundationpose_render::transform_points(stream, 
+                                          transform_device_buffer_, 
+                                          tfs_size, 
+                                          vertices_device_.get(), 
+                                          num_vertices_, 
+                                          output_buffer);
+  
+  cudaFreeAsync(transform_device_buffer_, stream);
+  return true;
+}
+
+
+bool FoundationPoseRenderer::GeneratePoseClipOnCUDA(cudaStream_t stream,
+                      float* output_buffer,
+                      const std::vector<Eigen::MatrixXf>& poses, 
+                      const RowMajorMatrix& bbox2d, 
+                      const Eigen::Matrix3f& K, 
+                      int rgb_H, int rgb_W) 
+{
+  const int tfs_size = poses.size();
+  CHECK_STATE(tfs_size > 0, "[FoundationPoseRender] `GeneratePoseClip` Got empty poses!!!");
+  Eigen::Matrix4f projection_mat;
+  CHECK_STATE(ProjectMatrixFromIntrinsics(projection_mat, K, rgb_H, rgb_W),
+        "[FoundationPoseRender] ProjectMatrixFromIntrinsics Failed!!!");
+
+  float* transform_buffer_device;
+  const int transform_total_elements = poses[0].cols() * poses[0].rows();
+  cudaMallocAsync(&transform_buffer_device, tfs_size * transform_total_elements * sizeof(float), stream);
+  for (int i = 0 ; i < tfs_size ; ++ i) {
+    Eigen::Matrix4f transform_matrix = projection_mat * (kGLCamInCVCam * poses[i]);
+    cudaMemcpyAsync(transform_buffer_device + i * transform_total_elements, 
+                    transform_matrix.data(), 
+                    transform_total_elements * sizeof(float), 
+                    cudaMemcpyHostToDevice, 
+                    stream); 
+  }
+
+  float* bbox2d_buffer_device;
+  const int bbox2d_matrix_total_elements = bbox2d.rows() * bbox2d.cols();
+  cudaMallocAsync(&bbox2d_buffer_device, bbox2d_matrix_total_elements * sizeof(float), stream);
+  cudaMemcpyAsync(bbox2d_buffer_device, 
+                  bbox2d.data(), 
+                  bbox2d_matrix_total_elements * sizeof(float), 
+                  cudaMemcpyHostToDevice, 
+                  stream);
+
+  foundationpose_render::generate_pose_clip(stream, 
+                                          transform_buffer_device, 
+                                          bbox2d_buffer_device,
+                                          tfs_size, 
+                                          vertices_device_.get(), 
+                                          num_vertices_, 
+                                          output_buffer, 
+                                          rgb_H, rgb_W);
+
+  cudaFreeAsync(bbox2d_buffer_device, stream);
+  cudaFreeAsync(transform_buffer_device, stream);
+
+  return true;
+}
+
+
 
 bool 
 FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream, 
                                         const std::vector<Eigen::MatrixXf>& poses, 
                                         const Eigen::Matrix3f& K, 
-                                        const Eigen::MatrixXf& bbox2d, 
+                                        const RowMajorMatrix& bbox2d, 
                                         int rgb_H, int rgb_W, int H, int W, 
                                         nvcv::Tensor& flip_color_tensor, 
                                         nvcv::Tensor& flip_xyz_map_tensor) 
 {
   size_t N = poses.size();
-  // Generate attributes for interpolate
-  std::vector<RowMajorMatrix> pts_cam;
-  CHECK_STATE(TransformPts(pts_cam, mesh_vertices_, poses),
-        "[FoundationposeRender] TransformPts Failed!!!");
+  CHECK_STATE(TransformVerticesOnCUDA(cuda_stream, poses, pts_cam_device_.get()),
+              "[FoundationPoseRender] Failed transform mesh vertices points !!!");
 
-  CHECK_STATE(pts_cam.size() != 0 && pts_cam.size() == N,
-        "[FoundationposeRender] The attribute size doesn't match pose size after transform");
+  CHECK_STATE(GeneratePoseClipOnCUDA(cuda_stream, pose_clip_device_.get(),
+                                   poses, bbox2d, K, rgb_H, rgb_W),
+              "[FoundationposeRender] `GeneratePoseClipCUDA` Failed !!!");
 
-  CHECK_STATE(pts_cam[0].rows() == num_vertices_,
-        "[FoundationposeRender] The attribute dimension doesn't match with vertices after transform");
-
-  // Vector of Eigen matrix is not continous in memory, flatten matrix and insert to vector
-  size_t num_attr = pts_cam[0].cols();
-  CHECK_STATE(pts_cam[0].IsRowMajor,
-        "[FoundationposeRender] Pts cam need to be row major in order to copy into device memory");
-
-  std::vector<float> pts_cam_vector;
-  pts_cam_vector.reserve(N * num_vertices_ * num_attr);
-  for (auto& mat : pts_cam) {
-    std::vector<float> mat_data(mat.data(), mat.data() + mat.size());
-    pts_cam_vector.insert(pts_cam_vector.end(), mat_data.begin(), mat_data.end());
-  }
-
-  Eigen::Matrix4f projection_mat;
-  CHECK_STATE(ProjectMatrixFromIntrinsics(projection_mat, K, rgb_H, rgb_W),
-        "[FoundationPoseRender] ProjectMatrixFromIntrinsics Failed!!!");
-
-  // Homogeneliaze the vertices to N * 4
-  auto pose_homo = ToHomo(mesh_vertices_);
-  CHECK_STATE(pose_homo.rows() == num_vertices_,
-        "[FoundationposeRender] The number of vertice should not change after homogeneliaze ");
-
-  CHECK_STATE(pose_homo.cols() == mesh_vertices_.cols() + 1,
-        "[FoundationposeRender] Points per vertex should increase by one after homogeneliaze");
-
-
-  std::vector<float> pose_clip;
-  CHECK_STATE(GeneratePoseClip(pose_clip, poses, bbox2d, pose_homo, projection_mat, rgb_H, rgb_W),
-        "[FoundationPoseRender] GeneratePoseClip Failed!!!");
-
-  CHECK_STATE(pose_clip.size() != 0,
-        "[FoundationposeRender] Pose clip should not be empty");
-
-
-
-  // Allocate device memory for the intermedia results on the first frame
-  size_t pose_clip_size = pose_clip.size() * sizeof(float);
-  size_t pts_cam_size = pts_cam_vector.size() * sizeof(float);
-
-  // Copy other data to device memory
-  CHECK_CUDA(cudaMemcpyAsync(pose_clip_device_.get(), 
-                            pose_clip.data(), 
-                            pose_clip_size, 
-                            cudaMemcpyHostToDevice, 
-                            cuda_stream),
-            "[FoundationPoseRenderer] cudaMemcpyAsync pose_clip host->device failed!!!");
-  CHECK_CUDA(cudaMemcpyAsync(pts_cam_device_.get(), 
-                            pts_cam_vector.data(), 
-                            pts_cam_size, 
-                            cudaMemcpyHostToDevice, 
-                            cuda_stream),
-            "[FoundationPoseRenderer] cudaMemcpyAsync pts_cam host->device failed!!!");
 
   foundationpose_render::rasterize(
       cuda_stream, cr_.get(),
@@ -690,7 +647,7 @@ FoundationPoseRenderer::RenderProcess(cudaStream_t cuda_stream,
 {
   const int N = poses.size();
   // Convert the bbox2d from vector N of 2*2 matrix into a N*4 matrix
-  Eigen::MatrixXf bbox2d(tfs.size(), 4);
+  RowMajorMatrix bbox2d(tfs.size(), 4);
   CHECK_STATE(ConstructBBox2D(bbox2d, tfs, crop_window_H_, crop_window_W_),
               "[FoundationPose Render] RenderProcess construct bbox2d failed!!!");
 

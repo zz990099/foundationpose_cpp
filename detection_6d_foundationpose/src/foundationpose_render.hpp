@@ -56,10 +56,21 @@ private:
 
   bool PrepareBuffer();
 
+  bool TransformVerticesOnCUDA(cudaStream_t stream,
+                  const std::vector<Eigen::MatrixXf>& tfs,
+                  float* output_buffer) ;
+
+  bool GeneratePoseClipOnCUDA(cudaStream_t stream,
+                      float* output_buffer,
+                      const std::vector<Eigen::MatrixXf>& poses, 
+                      const RowMajorMatrix& bbox2d, 
+                      const Eigen::Matrix3f& K, 
+                      int rgb_H, int rgb_W);
+
   bool NvdiffrastRender(cudaStream_t cuda_stream_, 
                         const std::vector<Eigen::MatrixXf>& poses, 
                         const Eigen::Matrix3f& K, 
-                        const Eigen::MatrixXf& bbox2d, 
+                        const RowMajorMatrix& bbox2d, 
                         int rgb_H, int rgb_W, int H, int W, 
                         nvcv::Tensor& flip_color_tensor, nvcv::Tensor& flip_xyz_map_tensor);
 
@@ -108,6 +119,7 @@ private:
   template<typename T>
   using DeviceBufferUniquePtrType = std::unique_ptr<T, std::function<void(T*)>>;
 
+  DeviceBufferUniquePtrType<float> vertices_device_ {nullptr};
   DeviceBufferUniquePtrType<float> texcoords_device_ {nullptr};
   DeviceBufferUniquePtrType<int32_t> mesh_faces_device_ {nullptr};
   DeviceBufferUniquePtrType<uint8_t> texture_map_device_ {nullptr};
