@@ -27,7 +27,7 @@
 
 |  nvidia-4060-8G   |   fps   |  cpu   |   gpu   |
 |:---------:|:---------:|:----------------:|:----------------:|
-|  foundationpose(fp16)-Register   |   1.5   |  100%   |  6.5GB   |
+|  foundationpose(fp16)-Register   |   2.8   |  100%   |  6.5GB   |
 |  foundationpose(fp16)-Track   |   220   |  100%   |  5.8GB   |
 
 
