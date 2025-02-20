@@ -206,7 +206,8 @@ TEST(foundationpose_test, test)
     std::string cur_depth_path = demo_data_path_ + "/depth/" + frame_ids[i] + ".png";
     cv::Mat cur_rgb = cv::imread(cur_rgb_path);
     cv::Mat cur_depth = cv::imread(cur_depth_path, cv::IMREAD_UNCHANGED);
-
+    cur_depth.convertTo(cur_depth, CV_32FC1);
+    cur_depth = cur_depth / 1000.0;
 
     Eigen::Matrix4f track_pose;
     foundation_pose->Track(cur_rgb.clone(), cur_depth, demo_name_, track_pose);
