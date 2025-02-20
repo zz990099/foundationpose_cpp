@@ -233,8 +233,6 @@ FoundationPoseRenderer::FoundationPoseRenderer(std::shared_ptr<TexturedMeshLoade
                                               const Eigen::Matrix3f& intrinsic,
                                               const int input_poses_num,
                                               const float crop_ratio,
-                                              const int input_image_H,
-                                              const int input_image_W,
                                               const int crop_window_H,
                                               const int crop_window_W,
                                               const float min_depth,
@@ -243,8 +241,6 @@ FoundationPoseRenderer::FoundationPoseRenderer(std::shared_ptr<TexturedMeshLoade
                                               intrinsic_(intrinsic),
                                               input_poses_num_(input_poses_num),
                                               crop_ratio_(crop_ratio),
-                                              input_image_H_(input_image_H),
-                                              input_image_W_(input_image_W),
                                               crop_window_H_(crop_window_H),
                                               crop_window_W_(crop_window_W),
                                               min_depth_(min_depth),
@@ -643,6 +639,8 @@ FoundationPoseRenderer::RenderProcess(cudaStream_t cuda_stream,
                                       const std::vector<Eigen::MatrixXf>& poses,
                                       const std::vector<RowMajorMatrix>& tfs,
                                       void* poses_on_device,
+                                      int input_image_height,
+                                      int input_image_width,
                                       void* render_input_dst_ptr)
 {
   const int N = poses.size();
@@ -663,8 +661,8 @@ FoundationPoseRenderer::RenderProcess(cudaStream_t cuda_stream,
                         poses, 
                         intrinsic_, 
                         bbox2d, 
-                        input_image_H_, 
-                        input_image_W_, 
+                        input_image_height, 
+                        input_image_width, 
                         crop_window_H_, 
                         crop_window_W_, 
                         render_rgb_tensor_, 
@@ -697,6 +695,8 @@ bool
 FoundationPoseRenderer::TransfProcess(cudaStream_t cuda_stream,
                                       void* rgb_on_device,
                                       void* xyz_map_on_device,
+                                      int input_image_height,
+                                      int input_image_width,
                                       const std::vector<RowMajorMatrix>& tfs,
                                       void* poses_on_device,
                                       void* transf_input_dst_ptr)
@@ -704,7 +704,7 @@ FoundationPoseRenderer::TransfProcess(cudaStream_t cuda_stream,
   // crop rgb (transformed)
   const size_t N = tfs.size();
 
-  nvcv::TensorShape::ShapeType rgb_shape{1, input_image_H_, input_image_W_, kNumChannels};
+  nvcv::TensorShape::ShapeType rgb_shape{1, input_image_height, input_image_width, kNumChannels};
   nvcv::TensorShape rgb_tensor_shape{rgb_shape, "NHWC"};
 
   nvcv::Tensor rgb_tensor = nvcv::Tensor(rgb_tensor_shape, nvcv::TYPE_U8);
@@ -712,11 +712,11 @@ FoundationPoseRenderer::TransfProcess(cudaStream_t cuda_stream,
 
   WrapImgPtrToNHWCTensor(reinterpret_cast<uint8_t*>(rgb_on_device), 
                         rgb_tensor, 
-                        1, input_image_H_, input_image_W_, kNumChannels);
+                        1, input_image_height, input_image_width, kNumChannels);
 
   WrapFloatPtrToNHWCTensor(reinterpret_cast<float*>(xyz_map_on_device), 
                           xyz_map_tensor, 
-                          1, input_image_H_, input_image_W_, kNumChannels);
+                          1, input_image_height, input_image_width, kNumChannels);
 
   const int rgb_flags = NVCV_INTERP_LINEAR;
   const int xyz_flags = NVCV_INTERP_NEAREST;
@@ -786,6 +786,8 @@ FoundationPoseRenderer::RenderAndTransform(
                             void* rgb_on_device,
                             void* depth_on_device,
                             void* xyz_map_on_device,
+                            int input_image_height,
+                            int input_image_width,
                             void* render_buffer,
                             void* transf_buffer)
 {
@@ -810,6 +812,8 @@ FoundationPoseRenderer::RenderAndTransform(
                             poses,
                             tfs,
                             input_poses_device_.get(),
+                            input_image_height,
+                            input_image_width,
                             render_buffer),
               "[FoundationPose Renderer] RenderProcess Failed!!!");
 
@@ -817,6 +821,8 @@ FoundationPoseRenderer::RenderAndTransform(
   CHECK_STATE(TransfProcess(cuda_stream_transf_,
                             rgb_on_device,
                             xyz_map_on_device,
+                            input_image_height,
+                            input_image_width,
                             tfs,
                             input_poses_device_.get(),
                             transf_buffer),

@@ -281,7 +281,7 @@ __global__ void transform_points_kernel(
   transformed_point[2] = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
 }
 
-uint16_t ceil_div(uint16_t numerator, uint16_t denominator) {
+static uint16_t ceil_div(uint16_t numerator, uint16_t denominator) {
   uint32_t accumulator = numerator + denominator - 1;
   return accumulator / denominator + 1;
 }
