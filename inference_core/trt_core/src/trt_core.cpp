@@ -368,7 +368,6 @@ bool TrtInferCore::Inference(std::shared_ptr<async_pipeline::IPipelinePackage> b
   CHECK_STATE(p_buf != nullptr, "[TrtInferCore] PreProcess got WRONG p_buf data format!");
 
   TrtBlobBuffer &buf = *p_buf;
-
   // Set dynamic blob shape
   for (const auto &p_name_shape : buf.map_blob_name2shape_)
   {
@@ -390,9 +389,30 @@ bool TrtInferCore::Inference(std::shared_ptr<async_pipeline::IPipelinePackage> b
                 "[TrtInferCore] Inference execute `context->setInputShape` failed!!!");
   }
 
+#if NV_TENSORRT_MAJOR == 10
+  // CHECK_STATE(context->allInputDimensionsSpecified(), 
+  //             "[TrtInferCore] Got unspecified dimensions of input!!!");
+              
+  for (const auto &p_name_index : map_input_blob_name2index_)
+  {
+    const std::string &s_blob_name   = p_name_index.first;
+    const int          index         = p_name_index.second;
+    context->setTensorAddress(s_blob_name.c_str(), buf.buffer_input_core_[index]);
+  }
+  for (const auto &p_name_index : map_output_blob_name2index_)
+  {
+    const std::string &s_blob_name   = p_name_index.first;
+    const int          index         = p_name_index.second;
+    context->setTensorAddress(s_blob_name.c_str(), buf.buffer_input_core_[index]);
+  }
+  context->enqueueV3(inference_stream_);
+
+#else
   // Do inference use `buf.buffer_input_core_` which is prepared by `PreProcess` stage.
   CHECK_STATE(context->enqueueV2(buf.buffer_input_core_.data(), inference_stream_, nullptr),
               "[TrtInferCore] Inference execute `context->enqueueV2` failed!!!");
+#endif
+
   cudaStreamSynchronize(inference_stream_);
   return true;
 }

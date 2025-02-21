@@ -3,23 +3,24 @@
 IMAGE_BASE_NAME="foundationpose_base_dev"
 BUILT_IMAGE_TAG=""
 
+CONTAINER_TYPE=""
 CONTAINER_NAME="foundationpose"
 
 usage() {
-  echo "Usage: $0 --platform=<platform>"
-  echo "Available platforms: jetson, nvidia_gpu, rk3588"
+  echo "Usage: $0 --container_type=<container_type>"
+  echo "Available container_types: trt8, trt10, jetson(not supported currently)"
   exit 1
 }
 
 parse_args() {
   if [ "$#" -ne 1 ]; then
-    usage
+    usage 
   fi
   # 解析参数
   for i in "$@"; do
       case $i in
-          --platform=*)
-              PLATFORM="${i#*=}"
+          --container_type=*)
+              CONTAINER_TYPE="${i#*=}"
               shift
               ;;
           *)
@@ -48,15 +49,56 @@ is_container_exist() {
   fi
 }
 
-build_nvidia_gpu_image() {
-  BUILT_IMAGE_TAG=${IMAGE_BASE_NAME}:nvidia_gpu_tensorrt_u2204
+build_nvidia_gpu_trt8_image() {
+  BUILT_IMAGE_TAG=${IMAGE_BASE_NAME}:nvidia_gpu_tensorrt8_u2204
   if is_image_exist ${BUILT_IMAGE_TAG}; then
     echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
   else
-    docker build -f foundationpose.dockerfile -t ${BUILT_IMAGE_TAG} . 
+    docker build -f foundationpose_nvidia_gpu_trt8.dockerfile -t ${BUILT_IMAGE_TAG} . 
   fi
 }
 
+build_nvidia_gpu_trt10_image() {
+  BUILT_IMAGE_TAG=${IMAGE_BASE_NAME}:nvidia_gpu_tensorrt10_u2204
+  if is_image_exist ${BUILT_IMAGE_TAG}; then
+    echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
+  else
+    docker build -f foundationpose_nvidia_gpu_trt10.dockerfile -t ${BUILT_IMAGE_TAG} . 
+  fi
+}
+
+build_jetson_image() {
+  BUILT_IMAGE_TAG=${IMAGE_BASE_NAME}:jetson_tensorrt_u2004
+  if is_image_exist ${BUILT_IMAGE_TAG}; then
+    echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
+  else
+    : # TODO
+  fi
+}
+
+build_image() {
+  case $CONTAINER_TYPE in
+      trt8)
+          echo "Start Building Docker image for nvidia_gpu trt8 ..."
+          build_nvidia_gpu_trt8_image
+          ;;
+      trt10)
+          echo "Start Building Docker image for nvidia_gpu trt10 ..."
+          build_nvidia_gpu_trt10_image
+          ;;
+      jetson)
+          echo "Jetson for container type is not supported currently"
+          usage
+          exit 1
+          # echo "Start Building Docker image for jetson ..."
+          # build_jetson_image
+          ;;
+      *)
+          echo "Unknown platform: $PLATFORM"
+          usage
+          ;;
+  esac
+}
 
 add_user() {
   echo Adding User: ${USER} into container
@@ -76,8 +118,6 @@ create_container() {
     return 0
   fi
 
-  EXTERNAL_TAG="--runtime nvidia"
-
   docker run -itd --privileged \
              --device /dev/dri \
              --group-add video \
@@ -91,14 +131,16 @@ create_container() {
              -e DOCKER_USER=${USER} \
              -e USER=${USER} \
              --name ${CONTAINER_NAME} \
-             ${EXTERNAL_TAG} \
+             --runtime nvidia \
              ${BUILT_IMAGE_TAG} \
              /bin/bash
 }
 
-build_nvidia_gpu_image
+parse_args "$@"
+
+build_image
 
 create_container
 
-echo "EasyDeploy Base Dev Enviroment Built Successfully!!!"
+echo "FoundationPose Base Dev Enviroment Built Successfully!!!"
 echo "Now Run into_docker.sh"
