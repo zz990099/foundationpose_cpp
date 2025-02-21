@@ -1,13 +1,11 @@
 #include "tests/fps_counter.h"
-#include <glog/logging.h>
-#include <glog/log_severity.h>
-#include <gtest/gtest.h>
-#include <opencv4/opencv2/opencv.hpp>
-#include <fstream>
+#include "tests/help_func.hpp"
+#include "tests/fs_util.hpp"
 
 #include "detection_6d_foundationpose/foundationpose.hpp"
 #include "trt_core/trt_core.h"
-#include "tests/fs_util.hpp"
+
+#include <gtest/gtest.h>
 
 using namespace inference_core;
 using namespace detection_6d;
@@ -20,120 +18,7 @@ static const std::string demo_textured_map_path = demo_data_path_ + "/mesh/textu
 static const std::string demo_name_ = "mustard";
 static const std::string frame_id = "1581120424100262102";
 
-
-void draw3DBoundingBox(const Eigen::Matrix3f& intrinsic, 
-                       const Eigen::Matrix4f& pose, 
-                       int input_image_H, 
-                       int input_image_W, 
-                       const Eigen::Vector3f& dimension,
-                       cv::Mat& image) {
-    // 目标的长宽高
-    float l = dimension(0) / 2;
-    float w = dimension(1) / 2;
-    float h = dimension(2) / 2;
-
-    // 目标的八个顶点在物体坐标系中的位置
-    Eigen::Vector3f points[8] = {
-        {-l, -w, h}, {l, -w, h}, {l, w, h}, {-l, w, h},
-        {-l, -w, -h}, {l, -w, -h}, {l, w, -h}, {-l, w, -h}
-    };
-
-
-    // 变换到世界坐标系
-    Eigen::Vector4f transformed_points[8];
-    for (int i = 0; i < 8; ++i) {
-        transformed_points[i] = pose * Eigen::Vector4f(points[i](0), points[i](1), points[i](2), 1);
-    }
-
-    // 投影到图像平面
-    std::vector<cv::Point2f> image_points;
-    for (int i = 0; i < 8; ++i) {
-        float x = transformed_points[i](0) / transformed_points[i](2);
-        float y = transformed_points[i](1) / transformed_points[i](2);
-
-        // 使用内参矩阵进行投影
-        float u = intrinsic(0, 0) * x + intrinsic(0, 2);
-        float v = intrinsic(1, 1) * y + intrinsic(1, 2);
-
-        image_points.emplace_back(static_cast<float>(u), static_cast<float>(v));
-
-    }
-
-    // 绘制边框（连接顶点）
-    std::vector<std::pair<int, int>> edges = {
-        {0, 1}, {1, 2}, {2, 3}, {3, 0}, // 底面
-        {4, 5}, {5, 6}, {6, 7}, {7, 4}, // 顶面
-        {0, 4}, {1, 5}, {2, 6}, {3, 7}  // 侧面
-    };
-
-    for (const auto& edge : edges) {
-        if (edge.first < image_points.size() && edge.second < image_points.size()) {
-            cv::line(image, image_points[edge.first], image_points[edge.second], 
-                     cv::Scalar(0, 255, 0), 2); // 绿色边框
-        }
-    }
-}
-
-Eigen::Matrix3f ReadCamK(const std::string& cam_K_path)
-{
-  Eigen::Matrix3f K;
-
-  // 打开文件
-  std::ifstream file(cam_K_path.c_str());
-  CHECK(file) << "Failed open file : " << cam_K_path;
-
-  // 读取数据并存入矩阵
-  for (int i = 0; i < 3; ++i) {
-      for (int j = 0; j < 3; ++j) {
-          file >> K(i, j);
-      }
-  }
-
-  // 关闭文件
-  file.close();
-
-  return K;
-}
-
-void saveVideo(const std::vector<cv::Mat>& frames, const std::string& outputPath, double fps = 30.0) {
-    if (frames.empty()) {
-        std::cerr << "Error: No frames to write!" << std::endl;
-        return;
-    }
-
-    // 获取帧的宽度和高度
-    int frameWidth = frames[0].cols;
-    int frameHeight = frames[0].rows;
-    
-    // 定义视频编码格式（MP4 使用 `cv::VideoWriter::fourcc('m', 'p', '4', 'v')` 或 `cv::VideoWriter::fourcc('H', '2', '6', '4')`）
-    int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');  // MPEG-4 编码
-    // int fourcc = cv::VideoWriter::fourcc('H', '2', '6', '4'); // H.264 编码（可能需要额外的编解码器支持）
-
-    // 创建 VideoWriter 对象
-    cv::VideoWriter writer(outputPath, fourcc, fps, cv::Size(frameWidth, frameHeight));
-
-    // 检查是否成功打开
-    if (!writer.isOpened()) {
-        std::cerr << "Error: Could not open the video file for writing!" << std::endl;
-        return;
-    }
-
-    // 写入所有帧
-    for (const auto& frame : frames) {
-        // 确保所有帧大小一致
-        if (frame.cols != frameWidth || frame.rows != frameHeight) {
-            std::cerr << "Error: Frame size mismatch!" << std::endl;
-            break;
-        }
-        writer.write(frame);
-    }
-
-    // 释放资源
-    writer.release();
-    std::cout << "Video saved successfully: " << outputPath << std::endl;
-}
-
-TEST(foundationpose_test, test) 
+std::shared_ptr<Base6DofDetectionModel> CreateFoundationPoseModel()
 {
   auto refiner_core = CreateTrtInferCore(refiner_engine_path_,
                                           {
@@ -153,7 +38,7 @@ TEST(foundationpose_test, test)
                                         {
                                           {"scores", {252, 1}}
                                         },
-                                        1);
+                                        1); 
   
   Eigen::Matrix3f intrinsic_in_mat = ReadCamK(demo_data_path_ + "/cam_K.txt");
 
@@ -163,56 +48,56 @@ TEST(foundationpose_test, test)
                                                   demo_textured_obj_path,
                                                   demo_textured_map_path,
                                                   intrinsic_in_mat);
-                                                
 
-  cv::Mat rgb = cv::imread(demo_data_path_ + "/rgb/" + frame_id + ".png");
-  cv::Mat depth = cv::imread(demo_data_path_ + "/depth/" + frame_id + ".png", cv::IMREAD_UNCHANGED);
-  cv::Mat mask = cv::imread(demo_data_path_ + "/masks/" + frame_id + ".png", cv::IMREAD_UNCHANGED);
+  return foundation_pose;
+}
 
-  depth.convertTo(depth, CV_32FC1);
-  depth = depth / 1000.f;
 
-  cv::cvtColor(rgb, rgb, cv::COLOR_BGR2RGB);
-  cv::cvtColor(mask, mask, cv::COLOR_BGR2RGB);
-  std::vector<cv::Mat> channels;
-  cv::split(mask, channels);
 
-  mask = channels[0];
+TEST(foundationpose_test, test) 
+{
+  auto foundation_pose = CreateFoundationPoseModel();
+  Eigen::Matrix3f intrinsic_in_mat = ReadCamK(demo_data_path_ + "/cam_K.txt");
+
+  const std::string first_rgb_path = demo_data_path_ + "/rgb/" + frame_id + ".png";
+  const std::string first_depth_path = demo_data_path_ + "/depth/" + frame_id + ".png";
+  const std::string first_mask_path = demo_data_path_ + "/masks/" + frame_id + ".png";
+
+  auto [rgb, depth, mask] = ReadRgbDepthMask(first_rgb_path, first_depth_path, first_mask_path);
 
   const Eigen::Vector3f object_dimension = foundation_pose->GetObjectDimension(demo_name_);
   
   Eigen::Matrix4f out_pose;
-  foundation_pose->Register(rgb.clone(), depth, mask, demo_name_, out_pose);
+  CHECK(foundation_pose->Register(rgb.clone(), depth, mask, demo_name_, out_pose));
+  LOG(WARNING) << "first Pose : " << out_pose;
 
   // [temp] for test
   cv::Mat regist_plot = rgb.clone();
+  cv::cvtColor(regist_plot, regist_plot, cv::COLOR_RGB2BGR);
   draw3DBoundingBox(intrinsic_in_mat, out_pose, 480, 640, object_dimension, regist_plot);
   cv::imwrite("/workspace/test_data/test_foundationpose_plot.png", regist_plot);
 
+
   auto rgb_paths = get_files_in_directory(demo_data_path_ + "/rgb/");
   std::sort(rgb_paths.begin(), rgb_paths.end());
-
   std::vector<std::string> frame_ids;
   for (const auto& rgb_path : rgb_paths) {
     frame_ids.push_back(rgb_path.stem());
   }
-
-  LOG(WARNING) << "first Pose : " << out_pose;
 
   int total = frame_ids.size();
   std::vector<cv::Mat> result_image_sequence {regist_plot};
   for (int i = 1 ; i < total ; ++ i) {
     std::string cur_rgb_path = demo_data_path_ + "/rgb/" + frame_ids[i] + ".png";
     std::string cur_depth_path = demo_data_path_ + "/depth/" + frame_ids[i] + ".png";
-    cv::Mat cur_rgb = cv::imread(cur_rgb_path);
-    cv::Mat cur_depth = cv::imread(cur_depth_path, cv::IMREAD_UNCHANGED);
-    cur_depth.convertTo(cur_depth, CV_32FC1);
-    cur_depth = cur_depth / 1000.0;
+    auto [cur_rgb, cur_depth] = ReadRgbDepth(cur_rgb_path, cur_depth_path);
 
     Eigen::Matrix4f track_pose;
-    foundation_pose->Track(cur_rgb.clone(), cur_depth, demo_name_, track_pose);
+    CHECK(foundation_pose->Track(cur_rgb.clone(), cur_depth, demo_name_, track_pose));
     LOG(WARNING) << "Track pose : " << track_pose;
+
     cv::Mat track_plot = cur_rgb.clone();
+    cv::cvtColor(track_plot, track_plot, cv::COLOR_RGB2BGR);
     draw3DBoundingBox(intrinsic_in_mat, track_pose, 480, 640, object_dimension, track_plot);
     cv::imshow("test_foundationpose_result", track_plot);
     cv::waitKey(20);
@@ -226,51 +111,14 @@ TEST(foundationpose_test, test)
 
 TEST(foundationpose_test, speed_register) 
 {
-  auto refiner_core = CreateTrtInferCore(refiner_engine_path_,
-                                          {
-                                            {"transf_input", {252, 160, 160, 6}},
-                                            {"render_input", {252, 160, 160, 6}},
-                                          },
-                                          {
-                                            {"trans", {252, 3}},
-                                            {"rot", {252, 3}}
-                                          }, 
-                                          1);
-  auto scorer_core = CreateTrtInferCore(scorer_engine_path_,
-                                        {
-                                          {"transf_input", {252, 160, 160, 6}},
-                                          {"render_input", {252, 160, 160, 6}},
-                                        },
-                                        {
-                                          {"scores", {252, 1}}
-                                        },
-                                        1);
-  
+  auto foundation_pose = CreateFoundationPoseModel();
   Eigen::Matrix3f intrinsic_in_mat = ReadCamK(demo_data_path_ + "/cam_K.txt");
+  
+  const std::string first_rgb_path = demo_data_path_ + "/rgb/" + frame_id + ".png";
+  const std::string first_depth_path = demo_data_path_ + "/depth/" + frame_id + ".png";
+  const std::string first_mask_path = demo_data_path_ + "/masks/" + frame_id + ".png";
 
-  auto foundation_pose = CreateFoundationPoseModel(refiner_core, 
-                                                  scorer_core,
-                                                  demo_name_,
-                                                  demo_textured_obj_path,
-                                                  demo_textured_map_path,
-                                                  intrinsic_in_mat);
-                                                
-
-  cv::Mat rgb = cv::imread(demo_data_path_ + "/rgb/" + frame_id + ".png");
-  cv::Mat depth = cv::imread(demo_data_path_ + "/depth/" + frame_id + ".png", cv::IMREAD_UNCHANGED);
-  cv::Mat mask = cv::imread(demo_data_path_ + "/masks/" + frame_id + ".png", cv::IMREAD_UNCHANGED);
-
-  depth.convertTo(depth, CV_32FC1);
-  depth = depth / 1000.f;
-
-  cv::cvtColor(rgb, rgb, cv::COLOR_BGR2RGB);
-  cv::cvtColor(mask, mask, cv::COLOR_BGR2RGB);
-  std::vector<cv::Mat> channels;
-  cv::split(mask, channels);
-
-  mask = channels[0];
-
-  const Eigen::Vector3f object_dimension = foundation_pose->GetObjectDimension(demo_name_);
+  auto [rgb, depth, mask] = ReadRgbDepthMask(first_rgb_path, first_depth_path, first_mask_path);
 
   // proccess
   FPSCounter counter;
@@ -282,62 +130,20 @@ TEST(foundationpose_test, speed_register)
   }
 
   LOG(WARNING) << "average fps: " << counter.GetFPS();
-
-  
 }
 
 
 
 TEST(foundationpose_test, speed_track) 
 {
-  auto refiner_core = CreateTrtInferCore(refiner_engine_path_,
-                                          {
-                                            {"transf_input", {252, 160, 160, 6}},
-                                            {"render_input", {252, 160, 160, 6}},
-                                          },
-                                          {
-                                            {"trans", {252, 3}},
-                                            {"rot", {252, 3}}
-                                          }, 
-                                          1);
-  auto scorer_core = CreateTrtInferCore(scorer_engine_path_,
-                                        {
-                                          {"transf_input", {252, 160, 160, 6}},
-                                          {"render_input", {252, 160, 160, 6}},
-                                        },
-                                        {
-                                          {"scores", {252, 1}}
-                                        },
-                                        1);
-  
+  auto foundation_pose = CreateFoundationPoseModel();
   Eigen::Matrix3f intrinsic_in_mat = ReadCamK(demo_data_path_ + "/cam_K.txt");
-
-  auto foundation_pose = CreateFoundationPoseModel(refiner_core, 
-                                                  scorer_core,
-                                                  demo_name_,
-                                                  demo_textured_obj_path,
-                                                  demo_textured_map_path,
-                                                  intrinsic_in_mat);
-                                                
-
-  cv::Mat rgb = cv::imread(demo_data_path_ + "/rgb/" + frame_id + ".png");
-  cv::Mat depth = cv::imread(demo_data_path_ + "/depth/" + frame_id + ".png", cv::IMREAD_UNCHANGED);
-  cv::Mat mask = cv::imread(demo_data_path_ + "/masks/" + frame_id + ".png", cv::IMREAD_UNCHANGED);
-
-  depth.convertTo(depth, CV_32FC1);
-  depth = depth / 1000.f;
-
-  cv::cvtColor(rgb, rgb, cv::COLOR_BGR2RGB);
-  cv::cvtColor(mask, mask, cv::COLOR_BGR2RGB);
-  std::vector<cv::Mat> channels;
-  cv::split(mask, channels);
-
-  mask = channels[0];
-
-  const Eigen::Vector3f object_dimension = foundation_pose->GetObjectDimension(demo_name_);
   
-  Eigen::Matrix4f out_pose;
-  foundation_pose->Register(rgb.clone(), depth, mask, demo_name_, out_pose);
+  const std::string first_rgb_path = demo_data_path_ + "/rgb/" + frame_id + ".png";
+  const std::string first_depth_path = demo_data_path_ + "/depth/" + frame_id + ".png";
+  const std::string first_mask_path = demo_data_path_ + "/masks/" + frame_id + ".png";
+
+  auto [rgb, depth, mask] = ReadRgbDepthMask(first_rgb_path, first_depth_path, first_mask_path);
 
   // proccess
   FPSCounter counter;
@@ -349,5 +155,4 @@ TEST(foundationpose_test, speed_track)
   }
 
   LOG(WARNING) << "average fps: " << counter.GetFPS();
-  
 }
