@@ -8,7 +8,7 @@
 ## Features
 
 1. 去除了原工程的复杂环境构建过程，以及各种依赖项问题，能够轻松适配到其他项目工程中。
-2. 对`FoundationPose`算法本身做了封装，简单明了。
+2. 对`FoundationPose`算法本身做了封装，**支持动态尺寸图像输入**，简单灵活。
 3. 提供了基于`BundleSDF`生成目标物三维模型的[脚本教程](./docs/gen_3d_obj_with_bundlesdf.md)。
 
 ## Demo
@@ -87,10 +87,6 @@
   ```
 
 在`/workspace/test_data/`下，可以看到`Register`和`Track`两个过程的结果。
-
-## TODO
-
-- [ ] 添加用户输入的管控逻辑，目前默认输入`rgb/depth/masks`的宽高为`640x480`
 
 ## References
 
