@@ -4,9 +4,17 @@
 #include "foundationpose_sampling.hpp"
 #include "foundationpose_utils.hpp"
 #include "foundationpose_decoder.hpp"
+#include "foundationpose_utils.cu.hpp"
+
+#define MAX_INPUT_IMAGE_HEIGHT 1080
+#define MAX_INPUT_IMAGE_WIDTH 1920
 
 
 namespace detection_6d {
+
+
+
+
 
 class FoundationPose : public Base6DofDetectionModel{
 public:
@@ -31,8 +39,8 @@ public:
                 const std::string& mesh_file_path,
                 const std::string& texture_file_path,
                 const Eigen::Matrix3f& intrinsic,
-                const int input_image_H = 480,
-                const int input_image_W = 640,
+                const int input_image_H = MAX_INPUT_IMAGE_HEIGHT,
+                const int input_image_W = MAX_INPUT_IMAGE_WIDTH,
                 const int crop_window_H = 160,
                 const int crop_window_W = 160,
                 const float min_depth = 0.1,
@@ -57,8 +65,8 @@ public:
                 std::shared_ptr<inference_core::BaseInferCore> scorer_core,
                 const std::unordered_map<std::string, std::pair<std::string, std::string>>& meshes,
                 const Eigen::Matrix3f& intrinsic,
-                const int input_image_H = 480,
-                const int input_image_W = 640,
+                const int max_input_image_H = MAX_INPUT_IMAGE_HEIGHT,
+                const int max_input_image_W = MAX_INPUT_IMAGE_WIDTH,
                 const int crop_window_H = 160,
                 const int crop_window_W = 160,
                 const float min_depth = 0.1,
@@ -80,6 +88,11 @@ public:
   Eigen::Vector3f GetObjectDimension(const std::string& target_name) const override;
 
 private:
+  bool CheckInputArguments(const cv::Mat& rgb, 
+                           const cv::Mat& depth, 
+                           const cv::Mat& mask, 
+                           const std::string& target_name);
+
   bool UploadDataToDevice(const cv::Mat& rgb,
                           const cv::Mat& depth,
                           const cv::Mat& mask,
@@ -111,8 +124,8 @@ private:
 private:
   // 以下参数对外开放，通过构造函数传入
   const Eigen::Matrix3f intrinsic_;
-  const int input_image_H_;
-  const int input_image_W_;
+  const int max_input_image_H_;
+  const int max_input_image_W_;
   const int crop_window_H_;
   const int crop_window_W_;
 
@@ -164,8 +177,8 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore> re
                               const std::unordered_map<std::string, 
                                               std::pair<std::string, std::string>>& meshes,
                               const Eigen::Matrix3f& intrinsic,
-                              const int input_image_H,
-                              const int input_image_W,
+                              const int max_input_image_H,
+                              const int max_input_image_W,
                               const int crop_window_H,
                               const int crop_window_W,
                               const float min_depth,
@@ -173,8 +186,8 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore> re
                             : refiner_core_(refiner_core),
                               scorer_core_(scorer_core),
                               intrinsic_(intrinsic),
-                              input_image_H_(input_image_H),
-                              input_image_W_(input_image_W),
+                              max_input_image_H_(max_input_image_H),
+                              max_input_image_W_(max_input_image_W),
                               crop_window_H_(crop_window_H),
                               crop_window_W_(crop_window_W)
 {
@@ -226,8 +239,8 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore> re
 
   hyp_poses_sampler_ = 
         std::make_shared<FoundationPoseSampler>(
-                    input_image_H_, 
-                    input_image_W_, 
+                    max_input_image_H_,
+                    max_input_image_W_,
                     min_depth, 
                     max_depth, 
                     intrinsic_
@@ -236,6 +249,26 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore> re
   out_pose_decoder_ = std::make_shared<FoundationPoseDecoder>(score_mode_poses_num_);
 }
 
+bool FoundationPose::CheckInputArguments(const cv::Mat& rgb, 
+                                         const cv::Mat& depth, 
+                                         const cv::Mat& mask, 
+                                         const std::string& target_name)
+{
+  const int r_rows = rgb.rows, r_cols = rgb.cols;
+  const int d_rows = depth.rows, d_cols = depth.cols;
+  const int m_rows = mask.empty() ? d_rows : mask.rows, m_cols = mask.empty() ? d_cols : mask.cols;
+
+  if (!(r_rows == d_rows && d_rows == m_rows) || !(r_cols == d_cols && d_cols == m_cols)) {
+    LOG(ERROR) << "[FoundationPose] Got rgb/depth/mask with different size! " << rgb.size << ", " << depth.size << ", " << mask.size;
+    return false;
+  } 
+
+  CHECK_STATE(map_name2loaders_.find(target_name) != map_name2loaders_.end(),
+            "[FoundationPose] Register Got Invalid `target_name` \
+                              which was not provided to FoundationPose instance!!!");
+
+  return true;
+}
 
 
 bool 
@@ -245,9 +278,8 @@ FoundationPose::Register(const cv::Mat& rgb,
                     const std::string& target_name,
                     Eigen::Matrix4f& out_pose)
 {
-  CHECK_STATE(map_name2loaders_.find(target_name) != map_name2loaders_.end(),
-            "[FoundationPose] Register Got Invalid `target_name` \
-                              which was not provided to FoundationPose instance!!!");
+  CHECK_STATE(CheckInputArguments(rgb, depth, mask, target_name),
+            "[FoundationPose] `Register` Got invalid arguments!!!");
 
   auto package = std::make_shared<FoundationPosePipelinePackage>();
   package->rgb_on_host = rgb;
@@ -287,9 +319,9 @@ FoundationPose::Track(const cv::Mat& rgb,
                       const std::string& target_name,
                       Eigen::Matrix4f& out_pose) 
 {
-  CHECK_STATE(map_name2loaders_.find(target_name) != map_name2loaders_.end(),
-            "[FoundationPose] Track Got Invalid `target_name` \
-                              which was not provided to FoundationPose instance!!!");
+  CHECK_STATE(CheckInputArguments(rgb, depth, cv::Mat(), target_name),
+            "[FoundationPose] `Track` Got invalid arguments!!!");
+
   CHECK_STATE(map_name2prev_pose_.find(target_name) != map_name2prev_pose_.end(),
             "[FoundationPose] Track target: " + target_name + " is NOT registered yet!!!\
             Call `Register` first before calling `Track`!!!");
@@ -338,14 +370,17 @@ FoundationPose::UploadDataToDevice(const cv::Mat& rgb,
                           const cv::Mat& mask,
                           const std::shared_ptr<FoundationPosePipelinePackage>& package)
 {
+  const int input_image_height = rgb.rows, input_image_width = rgb.cols;
+  package->input_image_height = input_image_height;
+  package->input_image_width = input_image_width;
+
   void  *rgb_on_device = nullptr, 
         *depth_on_device = nullptr, 
-        *xyz_map_on_device = nullptr, 
-        *mask_on_device = nullptr;
-  const size_t input_image_pixel_num = input_image_H_ * input_image_W_;
+        *xyz_map_on_device = nullptr;
+  const size_t input_image_pixel_num = input_image_height * input_image_width;
 
   // rgb图像拷贝至device端
-  CHECK_CUDA(cudaMallocManaged(&rgb_on_device, 
+  CHECK_CUDA(cudaMalloc(&rgb_on_device, 
                           input_image_pixel_num * 3 * sizeof(uint8_t)),
             "[FoundationPose] RefinePreProcess malloc managed `rgb_on_device` failed!!!");
   CHECK_CUDA(cudaMemcpy(rgb_on_device, 
@@ -355,7 +390,7 @@ FoundationPose::UploadDataToDevice(const cv::Mat& rgb,
             "[FoundationPose] cudaMemcpy rgb_host -> rgb_device FAILED!!!");
 
   // depth拷贝至device端
-  CHECK_CUDA(cudaMallocManaged(&depth_on_device,
+  CHECK_CUDA(cudaMalloc(&depth_on_device,
                           input_image_pixel_num * sizeof(float)),
             "[FoundationPose] RefinePreProcess malloc managed `depth_on_device` failed!!!");
   CHECK_CUDA(cudaMemcpy(depth_on_device,
@@ -364,43 +399,20 @@ FoundationPose::UploadDataToDevice(const cv::Mat& rgb,
                         cudaMemcpyHostToDevice),
             "[FoundationPose] cudaMemcpy depth_host -> depth_device FAILED!!!");
 
-  // 如果有mask，拷贝至device端
-  if (!mask.empty()) {
-    CHECK_CUDA(cudaMallocManaged(&mask_on_device, 
-                            input_image_pixel_num * sizeof(uint8_t)),
-              "[FoundationPose] RefinePreProcess malloc managed `mask_on_device` failed!!!");    
-    CHECK_CUDA(cudaMemcpy(mask_on_device,
-                          package->mask_on_host.data,
-                          input_image_pixel_num * sizeof(uint8_t),
-                          cudaMemcpyHostToDevice),
-              "[FoundationPose] cudaMemcpy mask_host -> mask_device FAILED!!!");  
-  }
-
-
   // 根据depth生成xyz_map，并拷贝至device端
-  CHECK_CUDA(cudaMallocManaged(&xyz_map_on_device,
+  CHECK_CUDA(cudaMalloc(&xyz_map_on_device,
                           input_image_pixel_num * 3 * sizeof(float)),
             "[FoundationPose] RefinePreProcess malloc managed `xyz_map_on_device` failed!!!");
 
-  for (int r = 0 ; r < input_image_H_ ; ++ r) {
-    for (int c = 0 ; c < input_image_W_ ; ++ c) {
-      const size_t offset = (r * input_image_W_ + c) * 3;
-      const float d = package->depth_on_host.at<float>({c,r});
-      float x,y,z;
-      if (d < 0.1) {
-        x = y = z = 0;
-      } else {
-        x = (c - intrinsic_(0,2)) * d / intrinsic_(0, 0);
-        y = (r - intrinsic_(1,2)) * d / intrinsic_(1, 1);
-        z = d;
-      }
-      float* _xyz_map_on_device = static_cast<float*>(xyz_map_on_device);
-      _xyz_map_on_device[offset+0] = x;
-      _xyz_map_on_device[offset+1] = y;
-      _xyz_map_on_device[offset+2] = z;
-    }
-  }
-
+  convert_depth_to_xyz_map(static_cast<float*>(depth_on_device), 
+                           input_image_height, 
+                           input_image_width, 
+                           static_cast<float*>(xyz_map_on_device), 
+                           intrinsic_(0, 0),
+                           intrinsic_(1, 1),
+                           intrinsic_(0, 2),
+                           intrinsic_(1, 2),
+                           0.1);
 
   // 输出device端指针，并注册析构过程
   auto func_release_cuda_buffer = [](void* ptr) {
@@ -412,8 +424,6 @@ FoundationPose::UploadDataToDevice(const cv::Mat& rgb,
   package->rgb_on_device = std::shared_ptr<void>(rgb_on_device, func_release_cuda_buffer);
   package->depth_on_device = std::shared_ptr<void>(depth_on_device, func_release_cuda_buffer);
   package->xyz_map_on_device = std::shared_ptr<void>(xyz_map_on_device, func_release_cuda_buffer);
-  package->mask_on_device = std::shared_ptr<void>(mask_on_device, func_release_cuda_buffer);
-
 
   return true;
 }
@@ -433,7 +443,9 @@ FoundationPose::RefinePreProcess(std::shared_ptr<async_pipeline::IPipelinePackag
   // 1. sample
   if (package->hyp_poses.empty()) {
     CHECK_STATE(hyp_poses_sampler_->GetHypPoses(package->depth_on_device.get(),
-                                                package->mask_on_device.get(),
+                                                package->mask_on_host.data,
+                                                package->input_image_height,
+                                                package->input_image_width,
                                                 package->hyp_poses),
                 "[FoundationPose] Failed to generate hyp poses!!!");    
   }
@@ -448,6 +460,8 @@ FoundationPose::RefinePreProcess(std::shared_ptr<async_pipeline::IPipelinePackag
                                     package->rgb_on_device.get(), 
                                     package->depth_on_device.get(), 
                                     package->xyz_map_on_device.get(), 
+                                    package->input_image_height,
+                                    package->input_image_width,
                                     refiner_blob_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first,
                                     refiner_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first),
               "[FoundationPose] Failed to render and transform !!!");
@@ -522,6 +536,8 @@ FoundationPose::ScorePreprocess(std::shared_ptr<async_pipeline::IPipelinePackage
                         package->rgb_on_device.get(), 
                         package->depth_on_device.get(), 
                         package->xyz_map_on_device.get(), 
+                        package->input_image_height,
+                        package->input_image_width,
                         scorer_blob_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first,
                         scorer_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first),
               "[FoundationPose] score_renderer RenderAndTransform Failed!!!");

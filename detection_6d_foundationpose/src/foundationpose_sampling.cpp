@@ -269,26 +269,31 @@ bool GuessTranslation(
 
 
 
-FoundationPoseSampler::FoundationPoseSampler(const int input_image_H,
-                                            const int input_image_W,
+FoundationPoseSampler::FoundationPoseSampler(const int max_input_image_H,
+                                            const int max_input_image_W,
                                             const float min_depth,
                                             const float max_depth,
                                             const Eigen::Matrix3f& intrinsic)
-                                          : input_image_H_(input_image_H),
-                                            input_image_W_(input_image_W),
+                                          : max_input_image_H_(max_input_image_H),
+                                            max_input_image_W_(max_input_image_W),
                                             min_depth_(min_depth),
-                                            intrinsic_(intrinsic)
+                                            intrinsic_(intrinsic),
+                                            pre_compute_rotations_(MakeRotationGrid())
 {
   CHECK_CUDA_THROW(cudaStreamCreate(&cuda_stream_),
                   "[FoundationPoseSampler] Failed to create cuda stream!!");
 
-  CHECK_CUDA_THROW(cudaMallocManaged(&erode_depth_buffer_device_, 
-                          input_image_H_ * input_image_W_ * sizeof(float)),
+  CHECK_CUDA_THROW(cudaMalloc(&erode_depth_buffer_device_, 
+                          max_input_image_H_ * max_input_image_W_ * sizeof(float)),
                   "[FoundationPoseSampler] Failed to malloc cuda memory of `erode_depth`");
   
-  CHECK_CUDA_THROW(cudaMallocManaged(&bilateral_depth_buffer_device_, 
-                          input_image_H_ * input_image_W_ * sizeof(float)),
+  CHECK_CUDA_THROW(cudaMalloc(&bilateral_depth_buffer_device_, 
+                          max_input_image_H_ * max_input_image_W_ * sizeof(float)),
                   "[FoundationPoseSampler] Failed to malloc cuda memory of `bilateral_depth`");
+  
+  bilateral_depth_buffer_host_.resize(max_input_image_H_ * max_input_image_W_);
+
+  LOG(INFO) << "[FoundationPoseSampler] Pre-computed rotations, size : " << pre_compute_rotations_.size();
 }
 
 FoundationPoseSampler::~FoundationPoseSampler()
@@ -308,43 +313,50 @@ FoundationPoseSampler::~FoundationPoseSampler()
 
 bool 
 FoundationPoseSampler::GetHypPoses(void* _depth_on_device,
-                          void* _mask_on_device,
+                          void* _mask_on_host,
+                          int input_image_height,
+                          int input_image_width,
                           std::vector<Eigen::Matrix4f>& out_hyp_poses)
 {
-  if (_depth_on_device == nullptr || _mask_on_device == nullptr) {
+  if (_depth_on_device == nullptr || _mask_on_host == nullptr) {
     throw std::invalid_argument("[FoudationPoseSampler] Got INVALID depth/mask ptr on device!!!");
   }
   // 1. 生成基于多面体的初始假设位姿
-  out_hyp_poses = MakeRotationGrid();
+  out_hyp_poses = pre_compute_rotations_;
   // 2. 优化depth深度图
   float* depth_on_device = static_cast<float*>(_depth_on_device);
-  uint8_t* mask_on_device = static_cast<uint8_t*>(_mask_on_device);
   // 2.1 depth腐蚀操作
   erode_depth(cuda_stream_, 
               depth_on_device, 
               erode_depth_buffer_device_, 
-              input_image_H_, 
-              input_image_W_);
+              input_image_height, 
+              input_image_width);
   // 2.2 depth双边滤波操作
   bilateral_filter_depth(cuda_stream_, 
                         erode_depth_buffer_device_, 
                         bilateral_depth_buffer_device_, 
-                        input_image_H_, 
-                        input_image_W_);
-  cudaStreamSynchronize(cuda_stream_);
+                        input_image_height, 
+                        input_image_width);
   // 2.3 拷贝到host端缓存
-  // cudaManaged申请的缓存cpu可直接访问，不再拷贝到host端
+  cudaMemcpyAsync(bilateral_depth_buffer_host_.data(), 
+                  bilateral_depth_buffer_device_, 
+                  input_image_height * input_image_width * sizeof(float), 
+                  cudaMemcpyDeviceToHost, 
+                  cuda_stream_);
+
+  // 2.4 同步cuda流
+  CHECK_CUDA(cudaStreamSynchronize(cuda_stream_),
+            "[FoundationPoseSampling] cudaStreamSync `cuda_stream_` FAILED!!!");
 
   // 3. 基于depth、mask估计目标物三维中心
-  // 从`cudaMallocManaged`缓存上构建Eigen矩阵
   Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> 
-                  bilateral_filter_depth_host(bilateral_depth_buffer_device_, 
-                                              input_image_H_, 
-                                              input_image_W_);
+                  bilateral_filter_depth_host(bilateral_depth_buffer_host_.data(), 
+                                              input_image_height, 
+                                              input_image_width);
   Eigen::Map<Eigen::Matrix<uint8_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> 
-                  mask_host(mask_on_device,
-                            input_image_H_,
-                            input_image_W_);
+                  mask_host(static_cast<uint8_t*>(_mask_on_host),
+                            input_image_height,
+                            input_image_width);
 
   Eigen::Vector3f center;
   CHECK_STATE(GuessTranslation(bilateral_filter_depth_host, 

@@ -133,6 +133,10 @@ struct FoundationPosePipelinePackage : public async_pipeline::IPipelinePackage
   // 目标物名称
   std::string target_name;
 
+  int input_image_height;
+  
+  int input_image_width;
+
   // device端的输入图像缓存
   std::shared_ptr<void> rgb_on_device;
   // device端的输入深度缓存
@@ -140,7 +144,7 @@ struct FoundationPosePipelinePackage : public async_pipeline::IPipelinePackage
   // device端由depth转换得到的xyz_map
   std::shared_ptr<void> xyz_map_on_device;
   // device端的输入mask缓存
-  std::shared_ptr<void> mask_on_device;
+  // std::shared_ptr<void> mask_on_device;
   // 生成的假设位姿
   std::vector<Eigen::Matrix4f> hyp_poses;
   // refine后的位姿
@@ -166,8 +170,9 @@ struct FoundationPosePipelinePackage : public async_pipeline::IPipelinePackage
 
 #define CHECK_CUDA(result, hint) \
 { \
-  if ((result) != cudaSuccess) { \
-    LOG(ERROR) << hint ; \
+  auto res = (result); \
+  if (res != cudaSuccess) { \
+    LOG(ERROR) << hint << "  CudaError: " << res; \
     return false; \
   } \
 }

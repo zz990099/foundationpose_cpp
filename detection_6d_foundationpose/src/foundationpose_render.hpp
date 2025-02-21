@@ -23,8 +23,6 @@ public:
                         const Eigen::Matrix3f& intrinsic,
                         const int input_poses_num,
                         const float crop_ratio = 1.2,
-                        const int input_image_H = 480,
-                        const int input_image_W = 640,
                         const int crop_window_H = 160,
                         const int crop_window_W = 160,
                         const float min_depth = 0.1,
@@ -34,6 +32,8 @@ public:
           void* rgb_on_device,
           void* depth_on_device,
           void* xyz_map_on_device,
+          int input_image_height,
+          int input_image_width,
           void* render_buffer,
           void* transf_buffer);
 
@@ -43,11 +43,15 @@ private:
                     const std::vector<Eigen::MatrixXf>& poses,
                     const std::vector<RowMajorMatrix>& tfs,
                     void* poses_on_device,
+                    int input_image_height,
+                    int input_image_width,
                     void* render_input_dst_ptr);
 
   bool TransfProcess(cudaStream_t cuda_stream,
                     void* rgb_on_device,
                     void* xyz_map_on_device,
+                    int input_image_height,
+                    int input_image_width,
                     const std::vector<RowMajorMatrix>& tfs,
                     void* poses_on_device,
                     void* transf_input_dst_ptr);
@@ -77,9 +81,6 @@ private:
 private:
   //
   const int input_poses_num_;
-  // original image info
-  const int input_image_H_;
-  const int input_image_W_;
 
   // crop window size (model input size)
   const int crop_window_H_;

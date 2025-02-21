@@ -12,7 +12,9 @@ namespace detection_6d {
 class Base6DofDetectionModel {
 public:
   /**
-   * @brief 类似FoundationPose算法的第一帧注册过程，在调用`Track`之前必须先调用`Register`
+   * @brief 实现的接口应支持动态输入尺寸，并检查rgb/depth/mask尺寸是否一致.
+   * 
+   * @note 相机内参与原始图像的尺寸是绑定的，不可在外部直接对图像进行resize操作，若需要进行resize，应对内参intrinsic同样处理 
    * 
    * @param rgb rgb图像，必须是`rgb`格式，从opencv-imread读取的图像默认是bgr格式，需经过转换
    * @param depth 获取的深度图像，cv::Mat数据格式为CV_32F1
