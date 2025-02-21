@@ -38,7 +38,7 @@
 1. 使用`docker`来构建运行环境
   ```bash
     cd ${foundationpose_cpp}/docker
-    bash build_docker.sh
+    bash build_docker.sh --container_type=trt8 # trt10
     bash into_docker.sh
   ```
 
