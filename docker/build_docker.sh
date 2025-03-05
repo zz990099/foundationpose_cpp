@@ -8,7 +8,7 @@ CONTAINER_NAME="foundationpose"
 
 usage() {
   echo "Usage: $0 --container_type=<container_type>"
-  echo "Available container_types: trt8, trt10, jetson(not supported currently)"
+  echo "Available container_types: trt8, trt10, jetson_trt8, jetson_trt10"
   exit 1
 }
 
@@ -67,12 +67,21 @@ build_nvidia_gpu_trt10_image() {
   fi
 }
 
-build_jetson_image() {
-  BUILT_IMAGE_TAG=${IMAGE_BASE_NAME}:jetson_tensorrt_u2004
+build_jetson_trt8_image() {
+  BUILT_IMAGE_TAG=${IMAGE_BASE_NAME}:jetson_tensorrt8_u2204
   if is_image_exist ${BUILT_IMAGE_TAG}; then
     echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
   else
-    : # TODO
+    docker build -f foundationpose_jetson_orin_trt8.dockerfile -t ${BUILT_IMAGE_TAG} . 
+  fi
+}
+
+build_jetson_trt10_image() {
+  BUILT_IMAGE_TAG=${IMAGE_BASE_NAME}:jetson_tensorrt10_u2204
+  if is_image_exist ${BUILT_IMAGE_TAG}; then
+    echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
+  else
+    docker build -f foundationpose_jetson_orin_trt10.dockerfile -t ${BUILT_IMAGE_TAG} . 
   fi
 }
 
@@ -86,23 +95,19 @@ build_image() {
           echo "Start Building Docker image for nvidia_gpu trt10 ..."
           build_nvidia_gpu_trt10_image
           ;;
-      jetson)
-          echo "Jetson for container type is not supported currently"
-          usage
-          exit 1
-          # echo "Start Building Docker image for jetson ..."
-          # build_jetson_image
+      jetson_trt8)
+          echo "Start Building Docker image for jetson trt8 ..."
+          build_jetson_trt8_image
+          ;;
+      jetson_trt10)
+          echo "Start Building Docker image for jetson trt10 ..."
+          build_jetson_trt10_image
           ;;
       *)
           echo "Unknown platform: $PLATFORM"
           usage
           ;;
   esac
-}
-
-add_user() {
-  echo Adding User: ${USER} into container
-   
 }
 
 create_container() {
