@@ -5,11 +5,16 @@
 
 **Notes:** 该项目只包含了`FoundationPose`部分的代码，实际上6D位姿检测的运行，还依赖于目标物的掩码，需要运行类似`SAM`的算法，[EasyDeploy](https://github.com/zz990099/EasyDeploy)项目下提供了`MobileSAM`和`NanoSAM`的算法实现和推理优化，可供参考。
 
+## Update LOG
+
+- [2025.03] 添加对Jetson Orin平台支持，[一键配置docker环境](docs/build_enviroment_on_jetson.md)
+
 ## Features
 
 1. 去除了原工程的复杂环境构建过程，以及各种依赖项问题，能够轻松适配到其他项目工程中。
 2. 对`FoundationPose`算法本身做了封装，**支持动态尺寸图像输入**，简单灵活。
 3. 提供了基于`BundleSDF`生成目标物三维模型的[脚本教程](./docs/gen_3d_obj_with_bundlesdf.md)。
+4. :fire: 支持Orin开发板(Orin-NX-16GB)
 
 ## Demo
 
@@ -30,6 +35,13 @@
 |  foundationpose(fp16)-Register   |   2.8   |  100%   |  6.5GB   |
 |  foundationpose(fp16)-Track   |   220   |  100%   |  5.8GB   |
 
+以下是在`jetson-orin-nx-16GB`硬件上执行结果
+
+|  jetson-orin-nx-16GB   |   fps   |  cpu   |   mem_total   |
+|:---------:|:---------:|:----------------:|:----------------:|
+|  foundationpose(fp16)-Register   |   0.6   |  15%   |  5.6GB(5.5GB on gpu)   |
+|  foundationpose(fp16)-Track   |   100   |  60%   |  5.1GB(5.0GB on gpu)   |
+
 
 ## Usage
 
@@ -38,7 +50,7 @@
 1. 使用`docker`来构建运行环境
   ```bash
     cd ${foundationpose_cpp}/docker
-    bash build_docker.sh --container_type=trt8 # trt10
+    bash build_docker.sh --container_type=trt8 # trt10, jetson_trt8, jetson_trt10
     bash into_docker.sh
   ```
 
