@@ -145,6 +145,9 @@ TEST(foundationpose_test, speed_track)
 
   auto [rgb, depth, mask] = ReadRgbDepthMask(first_rgb_path, first_depth_path, first_mask_path);
 
+  Eigen::Matrix4f first_pose;
+  foundation_pose->Register(rgb.clone(), depth, mask, demo_name_, first_pose);
+
   // proccess
   FPSCounter counter;
   counter.Start();
