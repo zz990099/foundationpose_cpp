@@ -131,14 +131,16 @@ private:
   DeviceBufferUniquePtrType<float> texcoords_out_device_ {nullptr};
   DeviceBufferUniquePtrType<float> color_device_ {nullptr};
   DeviceBufferUniquePtrType<float> xyz_map_device_ {nullptr};
+  DeviceBufferUniquePtrType<float> render_crop_rgb_tensor_device_ {nullptr};
+  DeviceBufferUniquePtrType<float> render_crop_xyz_map_tensor_device_ {nullptr};
 
   // transf 相关缓存
   DeviceBufferUniquePtrType<float> transformed_rgb_device_ {nullptr};
   DeviceBufferUniquePtrType<float> transformed_xyz_map_device_ {nullptr};
+  DeviceBufferUniquePtrType<uint8_t> transformed_crop_rgb_tensor_device_ {nullptr};
 
   // refine部分输入的poses在过程中是静止的，提供提前计算这部分poses和render结果的功能
   DeviceBufferUniquePtrType<float> input_poses_device_ {nullptr};
-  DeviceBufferUniquePtrType<float> render_static_result_buffer_device_ {nullptr};
 
   std::shared_ptr<CR::CudaRaster> cr_;
 
