@@ -1,20 +1,10 @@
 #include "foundationpose_render.hpp"
 
 #include <fstream>
-
-#include <glog/logging.h>
-#include <glog/log_severity.h>
-#include <assimp/postprocess.h>
-#include <assimp/scene.h>
-#include <assimp/Importer.hpp>
-#include <opencv2/opencv.hpp>
-
 #include "foundationpose_render.cu.hpp"
 #include "foundationpose_utils.hpp"
 
-
 namespace detection_6d {
-
 
 void saveFloatsToFile(const float* data, size_t N, const std::string& filename) {
     std::ofstream outFile(filename, std::ios::binary);
@@ -210,7 +200,6 @@ void WrapImgPtrToNHWCTensor(
   output_tensor = nvcv::TensorWrapData(output_data);
 }
 
-
 void WrapFloatPtrToNHWCTensor(
     float* input_ptr, nvcv::Tensor& output_tensor, int N, int H, int W, int C) {
   nvcv::TensorDataStridedCuda::Buffer output_buffer;
@@ -293,15 +282,19 @@ FoundationPoseRenderer::PrepareBuffer()
   float* _texcoords_out_device;
   float* _color_device;
   float* _xyz_map_device;
+  float* _render_crop_rgb_tensor_device;
+  float* _render_crop_xyz_map_tensor_device;
 
   // transf 相关缓存
   float* _transformed_rgb_device;
   float* _transformed_xyz_map_device;
+  uint8_t* _transformed_crop_rgb_tensor_device;
 
-  // refine部分输入的poses在过程中是静止的，提供提前计算这部分poses和render结果的功能
+  // 输入的假设位姿
   float* _input_poses_device;
 
 
+  // render用到的缓存
   CHECK_CUDA(cudaMalloc(&_pose_clip_device, pose_clip_size),
             "[FoundationPoseRenderer] cudaMalloc `_pose_clip_device` FAILED!!!");
   pose_clip_device_ = DeviceBufferUniquePtrType<float>(_pose_clip_device, CudaMemoryDeleter<float>());
@@ -326,16 +319,30 @@ FoundationPoseRenderer::PrepareBuffer()
             "[FoundationPoseRenderer] cudaMalloc `_xyz_map_device` FAILED!!!");
   xyz_map_device_ = DeviceBufferUniquePtrType<float>(_xyz_map_device, CudaMemoryDeleter<float>());
 
+  CHECK_CUDA(cudaMalloc(&_render_crop_rgb_tensor_device, color_size),
+            "[FoundationPoseRenderer] cudaMalloc `_color_device` FAILED!!!");
+  render_crop_rgb_tensor_device_ = DeviceBufferUniquePtrType<float>(_render_crop_rgb_tensor_device, CudaMemoryDeleter<float>());
+
+  CHECK_CUDA(cudaMalloc(&_render_crop_xyz_map_tensor_device, xyz_map_size),
+            "[FoundationPoseRenderer] cudaMalloc `_xyz_map_device` FAILED!!!");
+  render_crop_xyz_map_tensor_device_ = DeviceBufferUniquePtrType<float>(_render_crop_xyz_map_tensor_device, CudaMemoryDeleter<float>());
 
   // transf 用到的缓存
   const size_t device_buffer_byte_size 
                       = input_poses_num_ * crop_window_H_ * crop_window_W_ * kNumChannels * sizeof(float);
+  
   CHECK_CUDA(cudaMalloc(&_transformed_xyz_map_device, device_buffer_byte_size),
             "[FoundationPoseRenderer] cudaMalloc `_transformed_xyz_map_device` FAILED!!!");
   transformed_xyz_map_device_ = DeviceBufferUniquePtrType<float>(_transformed_xyz_map_device, CudaMemoryDeleter<float>());
+  
   CHECK_CUDA(cudaMalloc(&_transformed_rgb_device, device_buffer_byte_size),
             "[FoundationPoseRenderer] cudaMalloc `_transformed_rgb_device` FAILED!!!");
   transformed_rgb_device_ = DeviceBufferUniquePtrType<float>(_transformed_rgb_device, CudaMemoryDeleter<float>());
+
+  const size_t crop_rgb_byte_size = 1 * crop_window_H_ * crop_window_W_ * kNumChannels;
+  CHECK_CUDA(cudaMalloc(&_transformed_crop_rgb_tensor_device, crop_rgb_byte_size),
+            "[FoundationPoseRenderer] cudaMalloc `_transformed_crop_rgb_tensor_device` FAILED!!!");
+  transformed_crop_rgb_tensor_device_ = DeviceBufferUniquePtrType<uint8_t>(_transformed_crop_rgb_tensor_device, CudaMemoryDeleter<uint8_t>());
 
   // poses 的device缓存
   CHECK_CUDA(cudaMalloc(&_input_poses_device, input_poses_num_ * kTSMatrixDim * kTSMatrixDim * sizeof(float)),
@@ -649,12 +656,13 @@ FoundationPoseRenderer::RenderProcess(cudaStream_t cuda_stream,
   CHECK_STATE(ConstructBBox2D(bbox2d, tfs, crop_window_H_, crop_window_W_),
               "[FoundationPose Render] RenderProcess construct bbox2d failed!!!");
 
-
   // render
-  nvcv::TensorShape::ShapeType shape{N, crop_window_H_, crop_window_W_, kNumChannels};
-  nvcv::TensorShape tensor_shape{shape, "NHWC"};
-  nvcv::Tensor render_rgb_tensor_ = nvcv::Tensor(tensor_shape, nvcv::TYPE_F32);
-  nvcv::Tensor render_xyz_map_tensor_ = nvcv::Tensor(tensor_shape, nvcv::TYPE_F32);
+  nvcv::Tensor render_rgb_tensor;
+  nvcv::Tensor render_xyz_map_tensor;
+  WrapFloatPtrToNHWCTensor(render_crop_rgb_tensor_device_.get(),
+                          render_rgb_tensor, N, crop_window_H_, crop_window_W_, kNumChannels);
+  WrapFloatPtrToNHWCTensor(render_crop_xyz_map_tensor_device_.get(),
+                          render_xyz_map_tensor, N, crop_window_H_, crop_window_W_, kNumChannels);
 
   // Render the object using give poses
   CHECK_STATE(NvdiffrastRender(cuda_stream, 
@@ -665,12 +673,12 @@ FoundationPoseRenderer::RenderProcess(cudaStream_t cuda_stream,
                         input_image_width, 
                         crop_window_H_, 
                         crop_window_W_, 
-                        render_rgb_tensor_, 
-                        render_xyz_map_tensor_),
+                        render_rgb_tensor, 
+                        render_xyz_map_tensor),
               "[FoundationPose Render] RenderProcess NvdiffrastRender failed!!!");
 
-  auto render_rgb_data = render_rgb_tensor_.exportData<nvcv::TensorDataStridedCuda>();
-  auto render_xyz_map_data = render_xyz_map_tensor_.exportData<nvcv::TensorDataStridedCuda>();
+  auto render_rgb_data = render_rgb_tensor.exportData<nvcv::TensorDataStridedCuda>();
+  auto render_xyz_map_data = render_xyz_map_tensor.exportData<nvcv::TensorDataStridedCuda>();
  
   foundationpose_render::threshold_and_downscale_pointcloud(
       cuda_stream,
@@ -704,15 +712,10 @@ FoundationPoseRenderer::TransfProcess(cudaStream_t cuda_stream,
   // crop rgb (transformed)
   const size_t N = tfs.size();
 
-  nvcv::TensorShape::ShapeType rgb_shape{1, input_image_height, input_image_width, kNumChannels};
-  nvcv::TensorShape rgb_tensor_shape{rgb_shape, "NHWC"};
-
-  nvcv::Tensor rgb_tensor = nvcv::Tensor(rgb_tensor_shape, nvcv::TYPE_U8);
-  nvcv::Tensor xyz_map_tensor = nvcv::Tensor(rgb_tensor_shape, nvcv::TYPE_F32);
-
+  nvcv::Tensor rgb_tensor;
+  nvcv::Tensor xyz_map_tensor;
   WrapImgPtrToNHWCTensor(reinterpret_cast<uint8_t*>(rgb_on_device), 
-                        rgb_tensor, 
-                        1, input_image_height, input_image_width, kNumChannels);
+                        rgb_tensor, 1, input_image_height, input_image_width, kNumChannels);
 
   WrapFloatPtrToNHWCTensor(reinterpret_cast<float*>(xyz_map_on_device), 
                           xyz_map_tensor, 
@@ -725,13 +728,13 @@ FoundationPoseRenderer::TransfProcess(cudaStream_t cuda_stream,
   const float scale_factor =  1.0f / 255.0f;
   cvcuda::WarpPerspective warpPerspectiveOp(0);
   cvcuda::ConvertTo convert_op;
-  for (size_t index = 0; index < N; index++) {
-    nvcv::TensorShape::ShapeType transformed_shape{1, crop_window_H_, crop_window_W_, kNumChannels};
-    nvcv::TensorShape transformed_tensor_shape{transformed_shape, "NHWC"};
+  nvcv::Tensor transformed_rgb_tensor;
+  WrapImgPtrToNHWCTensor(transformed_crop_rgb_tensor_device_.get(), 
+                    transformed_rgb_tensor, 1, crop_window_H_, crop_window_W_, kNumChannels);
 
-    nvcv::Tensor transformed_rgb_tensor = nvcv::Tensor(transformed_tensor_shape, nvcv::TYPE_U8);
-    nvcv::Tensor float_rgb_tensor = nvcv::Tensor(transformed_tensor_shape, nvcv::TYPE_F32);
-    nvcv::Tensor transformed_xyz_map_tensor = nvcv::Tensor(transformed_tensor_shape, nvcv::TYPE_F32);
+  for (size_t index = 0; index < N; index++) {
+    nvcv::Tensor float_rgb_tensor;
+    nvcv::Tensor transformed_xyz_map_tensor;
 
     // get ptr offset from index
     const size_t single_batch_element_size = crop_window_H_ * crop_window_W_ * kNumChannels;
@@ -807,17 +810,7 @@ FoundationPoseRenderer::RenderAndTransform(
               "[FoundationposeRender] cudaMemcpy poses_host -> poses_device FAILED!!!");
   }
 
-  // 3. 根据poses和tfs渲染rgb图像和xyz_map，并Transpose后填充至目标缓存
-  CHECK_STATE(RenderProcess(cuda_stream_render_,
-                            poses,
-                            tfs,
-                            input_poses_device_.get(),
-                            input_image_height,
-                            input_image_width,
-                            render_buffer),
-              "[FoundationPose Renderer] RenderProcess Failed!!!");
-
-  // 4. 根据poses和tfs裁剪输入rgb和xyz_map，并Transpose后填充至目标缓存
+  // 3. 根据poses和tfs裁剪输入rgb和xyz_map，并Transpose后填充至目标缓存
   CHECK_STATE(TransfProcess(cuda_stream_transf_,
                             rgb_on_device,
                             xyz_map_on_device,
@@ -827,12 +820,21 @@ FoundationPoseRenderer::RenderAndTransform(
                             input_poses_device_.get(),
                             transf_buffer),
               "[FoundationPose Renderer] TransfProcess Failed!!!");
+  // 4. 根据poses和tfs渲染rgb图像和xyz_map，并Transpose后填充至目标缓存
+  CHECK_STATE(RenderProcess(cuda_stream_render_,
+                            poses,
+                            tfs,
+                            input_poses_device_.get(),
+                            input_image_height,
+                            input_image_width,
+                            render_buffer),
+              "[FoundationPose Renderer] RenderProcess Failed!!!");
 
   // 同步render和transform流程的cuda_stream，确保退出前任务全部完成
-  CHECK_CUDA(cudaStreamSynchronize(cuda_stream_render_),
-            "[FoundationPose Renderer] cudaStreamSync `cuda_stream_render` FAILED!!!");
   CHECK_CUDA(cudaStreamSynchronize(cuda_stream_transf_),
             "[FoundationPose Renderer] cudaStreamSync `cuda_stream_transf_` FAILED!!!");
+  CHECK_CUDA(cudaStreamSynchronize(cuda_stream_render_),
+            "[FoundationPose Renderer] cudaStreamSync `cuda_stream_render` FAILED!!!");
   return true;
 }
 
