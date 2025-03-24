@@ -196,8 +196,8 @@ void rasterize(
 
 void interpolate(
     cudaStream_t stream, float* attr_ptr, float* rast_ptr, int32_t* tri_ptr, float* out, int num_vertices,
-    int num_triangles, int attr_dim, int H, int W, int C) {
-  int instance_mode = attr_dim > 2 ? 1 : 0;
+    int num_triangles, int attr_shape_dim, int attr_dim, int H, int W, int C) {
+  int instance_mode = attr_shape_dim > 2 ? 1 : 0;
 
   InterpolateKernelParams p = {};  // Initialize all fields to zero.
   p.instance_mode = instance_mode;
@@ -337,6 +337,90 @@ void generate_pose_clip(cudaStream_t stream, const float* transform_matrixs, con
 
   generate_pose_clip_kernel<<<gridSize, blockSize, 0, stream>>>(
       transform_matrixs, bbox2d_matrix, M, points_vectors, N, transformed_points_vectors, rgb_H, rgb_W);
+}
+
+
+__global__ void transform_normals_kernel(
+    const float* transform_matrixs, int M, const float* normals_vectors, 
+    int N, float* transformed_normal_vectors)
+{
+  int row_idx = threadIdx.y + blockIdx.y * blockDim.y;
+  int col_idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (row_idx >= M || col_idx >= N) return;
+
+  const float* matrix = transform_matrixs + row_idx * 16;  // 指向当前 4x4 变换矩阵
+  const float* normal = normals_vectors + col_idx * 3;       // 指向当前 normal 向量
+  float* transformed_normal = transformed_normal_vectors + (row_idx * N + col_idx);
+
+  float x = normal[0], y = normal[1], z = normal[2];
+  // **Column-Major 访问方式**
+  float tx = matrix[0] * x + matrix[4] * y + matrix[8]  * z;
+  float ty = matrix[1] * x + matrix[5] * y + matrix[9]  * z;
+  float tz = matrix[2] * x + matrix[6] * y + matrix[10] * z;
+  // 只保留z方向的分量，取反
+  float l2 = sqrt(tx*tx + ty*ty + tz*tz);
+  float value = l2 == 0 ? 0 : - tz / l2;
+  value = clamp_func(value, 0, 1);
+  transformed_normal[0] = value;
+}
+
+void transform_normals(cudaStream_t stream, const float* transform_matrixs, int M, const float* normals_vectors, 
+    int N, float* transformed_normal_vectors)
+{
+  dim3 blockSize = {32, 32};
+  dim3 gridSize = {ceil_div(N, 32), ceil_div(M, 32)};
+
+  transform_normals_kernel<<<gridSize, blockSize, 0, stream>>>(
+      transform_matrixs, M, normals_vectors, N, transformed_normal_vectors);
+}
+
+
+__global__ void renfine_color_kernel(
+    const float* color, const float* diffuse_intensity_map, const float* rast_out, float* output, int poses_num, float w_ambient, 
+    float w_diffuse, int rgb_H, int rgb_W)
+{
+  int row_idx = threadIdx.y + blockIdx.y * blockDim.y;
+  int col_idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (row_idx >= rgb_H || col_idx >= rgb_W * poses_num) return;
+
+  const int color_idx = col_idx / rgb_W;
+  const int color_row_idx = row_idx;
+  const int color_col_idx = col_idx - color_idx * rgb_W;
+
+  const size_t pixel_idx = color_row_idx * rgb_W + color_col_idx;
+  const size_t pixel_offset = color_idx * rgb_H * rgb_W + pixel_idx;
+
+  const float* rgb = color + pixel_offset * 3;
+  const float* diffuse = diffuse_intensity_map + pixel_offset;
+  const float* rast = rast_out + pixel_offset * 4;
+  float* out = output + pixel_offset * 3;
+
+  float diff = diffuse[0];
+
+  float is_foreground = clamp_func(rast[3], 0, 1);
+
+  float r = rgb[0] * (w_ambient + diff*w_diffuse) * is_foreground;
+  float g = rgb[1] * (w_ambient + diff*w_diffuse) * is_foreground;
+  float b = rgb[2] * (w_ambient + diff*w_diffuse) * is_foreground;
+
+  r = clamp_func(r, 0, 1);
+  g = clamp_func(g, 0, 1);
+  b = clamp_func(b, 0, 1);
+  
+  out[0] = r;
+  out[1] = g;
+  out[2] = b;
+}
+
+void refine_color(cudaStream_t stream, const float* color, const float* diffuse_intensity_map, const float* rast_out, float* output,
+        int poses_num, float w_ambient, float w_diffuse, int rgb_H, int rgb_W)
+{
+  dim3 blockSize = {32, 32};
+  dim3 gridSize = {ceil_div(rgb_W * poses_num, 32), ceil_div(rgb_H, 32)};
+
+  renfine_color_kernel<<<gridSize, blockSize, 0, stream>>>(
+    color, diffuse_intensity_map, rast_out, output, poses_num, w_ambient, w_diffuse, rgb_H, rgb_W
+  );
 }
 
 }   // namespace foundationpose_render

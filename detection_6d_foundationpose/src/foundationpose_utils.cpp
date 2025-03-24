@@ -148,6 +148,7 @@ TexturedMeshLoader::TexturedMeshLoader(const std::string& mesh_file_path,
   // Walk through each of the mesh's vertices
   for (unsigned int v = 0; v < mesh->mNumVertices; v++) {
     vertices_.push_back(mesh->mVertices[v]);
+    vertex_normals_.push_back(mesh->mNormals[v]);
   }
   for (unsigned int i = 0 ; i < AI_MAX_NUMBER_OF_TEXTURECOORDS ; ++ i) {
     if (mesh->mTextureCoords[i] != nullptr) {
@@ -167,11 +168,11 @@ TexturedMeshLoader::TexturedMeshLoader(const std::string& mesh_file_path,
   LOG(INFO) << "Loading textured map file: " << textured_file_path;
   texture_map_ = cv::imread(textured_file_path);
   if (texture_map_.empty()) {
-    throw std::runtime_error("[TexturedMeshLoader] Failed to read textured image: "
-                            + textured_file_path);
+    // throw std::runtime_error("[TexturedMeshLoader] Failed to read textured image: "
+    //                         + textured_file_path);
+    texture_map_ = cv::Mat(2, 2, CV_8UC3, {100, 100, 100});
   }
   cv::cvtColor(texture_map_, texture_map_, cv::COLOR_BGR2RGB);
-
 
   LOG(INFO) << "Successfully Loaded textured mesh file!!!";
   LOG(INFO) << "Mesh has vertices_num: " << vertices_.size()
@@ -215,6 +216,17 @@ const std::vector<aiVector3D> &
 TexturedMeshLoader::GetMeshVertices() const noexcept
 {
   return vertices_;
+}
+
+/**
+ * @brief 获取mesh模型顶点的法向量
+ * 
+ * @return const std::vector<aiVector3D> &
+ */
+const std::vector<aiVector3D> & 
+TexturedMeshLoader::GetMeshVertexNormals() const noexcept
+{
+  return vertex_normals_;
 }
 
 /**

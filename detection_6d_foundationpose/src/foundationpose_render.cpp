@@ -270,6 +270,8 @@ FoundationPoseRenderer::PrepareBuffer()
   // nvdiffrast render 用到的缓存以及渲染器
   size_t pose_clip_size =  num_vertices_ * (kVertexPoints + 1) * input_poses_num_ * sizeof(float);
   size_t pts_cam_size = num_vertices_ * kVertexPoints * input_poses_num_ * sizeof(float);
+  size_t diffuse_intensity_size = num_vertices_ * input_poses_num_ * sizeof(float);
+  size_t diffuse_intensity_map_size = input_poses_num_ * crop_window_H_ * crop_window_W_ * sizeof(float);
   size_t rast_out_size = input_poses_num_ * crop_window_H_ * crop_window_W_ * (kVertexPoints + 1) * sizeof(float);
   size_t color_size = input_poses_num_ * crop_window_H_ * crop_window_W_ * kNumChannels * sizeof(float);
   size_t xyz_map_size = input_poses_num_ * crop_window_H_ * crop_window_W_ * kNumChannels * sizeof(float);
@@ -279,6 +281,8 @@ FoundationPoseRenderer::PrepareBuffer()
   float* _pose_clip_device;
   float* _rast_out_device;
   float* _pts_cam_device;
+  float* _diffuse_intensity_device;
+  float* _diffuse_intensity_map_device;
   float* _texcoords_out_device;
   float* _color_device;
   float* _xyz_map_device;
@@ -306,6 +310,14 @@ FoundationPoseRenderer::PrepareBuffer()
   CHECK_CUDA(cudaMalloc(&_pts_cam_device, pts_cam_size),
             "[FoundationPoseRenderer] cudaMalloc `_pts_cam_device` FAILED!!!");
   pts_cam_device_ = DeviceBufferUniquePtrType<float>(_pts_cam_device, CudaMemoryDeleter<float>());
+
+  CHECK_CUDA(cudaMalloc(&_diffuse_intensity_device, diffuse_intensity_size),
+            "[FoundationPoseRenderer] cudaMalloc `_diffuse_intensity_device` FAILED!!!");
+  diffuse_intensity_device_ = DeviceBufferUniquePtrType<float>(_diffuse_intensity_device, CudaMemoryDeleter<float>());
+
+  CHECK_CUDA(cudaMalloc(&_diffuse_intensity_map_device, diffuse_intensity_map_size),
+            "[FoundationPoseRenderer] cudaMalloc `_diffuse_intensity_map_device` FAILED!!!");
+  diffuse_intensity_map_device_ = DeviceBufferUniquePtrType<float>(_diffuse_intensity_map_device, CudaMemoryDeleter<float>());
 
   CHECK_CUDA(cudaMalloc(&_texcoords_out_device, texcoords_out_size),
             "[FoundationPoseRenderer] cudaMalloc `_texcoords_out_device` FAILED!!!");
@@ -361,17 +373,23 @@ FoundationPoseRenderer::LoadTexturedMesh()
 {
   const auto& mesh_model_center = mesh_loader_->GetMeshModelCenter();  
   const auto& mesh_vertices = mesh_loader_->GetMeshVertices();
+  const auto& mesh_vertex_normals = mesh_loader_->GetMeshVertexNormals();
   const auto& mesh_texcoords = mesh_loader_->GetMeshTextureCoords();
   const auto& mesh_faces = mesh_loader_->GetMeshFaces();
   const auto& rgb_texture_map = mesh_loader_->GetTextureMap();
   mesh_diameter_ = mesh_loader_->GetMeshDiameter();
 
+  std::vector<float> vertex_normals;
 
   // Walk through each of the mesh's vertices
   for (unsigned int v = 0; v < mesh_vertices.size(); v++) {
     vertices_.push_back(mesh_vertices[v].x - mesh_model_center[0]);
     vertices_.push_back(mesh_vertices[v].y - mesh_model_center[1]);
     vertices_.push_back(mesh_vertices[v].z - mesh_model_center[2]);
+
+    vertex_normals.push_back(mesh_vertex_normals[v].x);
+    vertex_normals.push_back(mesh_vertex_normals[v].y);
+    vertex_normals.push_back(mesh_vertex_normals[v].z);
 
     // Check if the mesh has texture coordinates
     if (mesh_texcoords.size() >= 1) {
@@ -422,6 +440,7 @@ FoundationPoseRenderer::LoadTexturedMesh()
   size_t texcoords_size = texcoords_.size() * sizeof(float);
 
   float* _vertices_device;
+  float* _vertex_normals_device;
   float* _texcoords_device;
   int32_t* _mesh_faces_device;
   uint8_t* _texture_map_device;
@@ -429,6 +448,10 @@ FoundationPoseRenderer::LoadTexturedMesh()
   CHECK_CUDA(cudaMalloc(&_vertices_device, vertices_size),
             "[FoundationposeRender] cudaMalloc `mesh_faces_device` FAILED!!!");
   vertices_device_ = DeviceBufferUniquePtrType<float>(_vertices_device, CudaMemoryDeleter<float>());
+
+  CHECK_CUDA(cudaMalloc(&_vertex_normals_device, vertices_size),
+            "[FoundationposeRender] cudaMalloc `vertex_normals_device` FAILED!!!");
+  vertex_normals_device_ = DeviceBufferUniquePtrType<float>(_vertex_normals_device, CudaMemoryDeleter<float>());
 
   CHECK_CUDA(cudaMalloc(&_mesh_faces_device, faces_size),
             "[FoundationposeRender] cudaMalloc `mesh_faces_device` FAILED!!!");
@@ -442,9 +465,14 @@ FoundationPoseRenderer::LoadTexturedMesh()
             "[FoundationposeRender] cudaMalloc `texture_map_device_` FAILED!!!");
   texture_map_device_ = DeviceBufferUniquePtrType<uint8_t>(_texture_map_device, CudaMemoryDeleter<uint8_t>());
 
-  CHECK_CUDA(cudaMemcpy(vertices_device_.get(), 
-                        vertices_.data(), 
-                        vertices_size, 
+  CHECK_CUDA(cudaMemcpy(vertices_device_.get(),
+                        vertices_.data(),
+                        vertices_size,
+                        cudaMemcpyHostToDevice),
+            "[FoundationposeRender] cudaMemcpy mesh_faces_host -> mesh_faces_device FAILED!!!");
+  CHECK_CUDA(cudaMemcpy(vertex_normals_device_.get(),
+                        vertex_normals.data(),
+                        vertices_size,
                         cudaMemcpyHostToDevice),
             "[FoundationposeRender] cudaMemcpy mesh_faces_host -> mesh_faces_device FAILED!!!");
   CHECK_CUDA(cudaMemcpy(mesh_faces_device_.get(), 
@@ -514,6 +542,36 @@ bool FoundationPoseRenderer::TransformVerticesOnCUDA(cudaStream_t stream,
   return true;
 }
 
+bool FoundationPoseRenderer::TransformVertexNormalsOnCUDA(cudaStream_t stream,
+                          const std::vector<Eigen::MatrixXf>& tfs,
+                          float* output_buffer)
+{
+  // Get the dimensions of the inputs
+  int tfs_size = tfs.size();
+  CHECK_STATE(tfs_size != 0,
+        "[FoundationposeRender] The transfomation matrix is empty! ");
+
+  CHECK_STATE(tfs[0].cols() == tfs[0].rows(),
+        "[FoundationposeRender] The transfomation matrix has different rows and cols! ");
+
+  const int total_elements = tfs[0].cols() * tfs[0].rows();
+
+  float* transform_device_buffer_ = nullptr;
+  cudaMallocAsync(&transform_device_buffer_, tfs_size * total_elements * sizeof(float), stream);
+
+  for (int i = 0 ; i < tfs_size ; ++ i) {
+    cudaMemcpyAsync(transform_device_buffer_ + i * total_elements, 
+                    tfs[i].data(), 
+                    total_elements * sizeof(float), 
+                    cudaMemcpyHostToDevice, 
+                    stream);
+  }
+
+  foundationpose_render::transform_normals(stream, transform_device_buffer_, tfs_size, vertex_normals_device_.get(), num_vertices_, output_buffer);
+
+  cudaFreeAsync(transform_device_buffer_, stream);
+  return true;
+}
 
 bool FoundationPoseRenderer::GeneratePoseClipOnCUDA(cudaStream_t stream,
                       float* output_buffer,
@@ -595,7 +653,7 @@ FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream,
   foundationpose_render::interpolate(
       cuda_stream,
       pts_cam_device_.get(), rast_out_device_.get(), mesh_faces_device_.get(), xyz_map_device_.get(),
-      num_vertices_, num_faces_, kVertexPoints,
+      num_vertices_, num_faces_, 3, kVertexPoints,
       H, W, N);
   CHECK_CUDA(cudaGetLastError(),
             "[FoundationPoseRenderer] interpolate failed!!!");
@@ -603,7 +661,7 @@ FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream,
   foundationpose_render::interpolate(
       cuda_stream,
       texcoords_device_.get(), rast_out_device_.get(), mesh_faces_device_.get(), texcoords_out_device_.get(),
-      num_vertices_, num_faces_, kTexcoordsDim,
+      num_vertices_, num_faces_, 2, kTexcoordsDim,
       H, W, N);
   CHECK_CUDA(cudaGetLastError(),
             "[FoundationPoseRenderer] interpolate failed!!!");
@@ -618,6 +676,26 @@ FoundationPoseRenderer::NvdiffrastRender(cudaStream_t cuda_stream,
       1, H, W, N);
   CHECK_CUDA(cudaGetLastError(),
             "[FoundationPoseRenderer] texture failed!!!");
+
+  CHECK_STATE(TransformVertexNormalsOnCUDA(cuda_stream, poses, diffuse_intensity_device_.get()), 
+            "[FoundationPoseRenderer] Transform vertex normals failed!!!");
+
+  foundationpose_render::interpolate(cuda_stream, 
+                                     diffuse_intensity_device_.get(), 
+                                     rast_out_device_.get(), 
+                                     mesh_faces_device_.get(),
+                                     diffuse_intensity_map_device_.get(),
+                                     num_vertices_, num_faces_, 3, 1, H, W, N);
+  CHECK_CUDA(cudaGetLastError(),
+            "[FoundationPoseRenderer] interpolate failed!!!");
+  
+  foundationpose_render::refine_color(cuda_stream, color_device_.get(), 
+                                      diffuse_intensity_map_device_.get(), 
+                                      rast_out_device_.get(),
+                                      color_device_.get(), 
+                                      poses.size(), 0.8, 0.5, H, W);
+  CHECK_CUDA(cudaGetLastError(),
+            "[FoundationPoseRenderer] refine_color failed!!!");
 
   float min_value = 0.0;
   float max_value = 1.0;
