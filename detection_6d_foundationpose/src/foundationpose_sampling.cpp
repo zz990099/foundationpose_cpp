@@ -200,7 +200,7 @@ std::vector<Eigen::Matrix4f> MakeRotationGrid(unsigned int n_views = 40, int inp
       auto R_inplane = Eigen::Affine3f::Identity();
       R_inplane.rotate(Eigen::AngleAxisf(0, Eigen::Vector3f::UnitX()))
           .rotate(Eigen::AngleAxisf(0, Eigen::Vector3f::UnitY()))
-          .rotate(Eigen::AngleAxisf(inplane_rot, Eigen::Vector3f::UnitZ()));
+          .rotate(Eigen::AngleAxisf(inplane_rot * M_PI / 180.0f, Eigen::Vector3f::UnitZ()));
 
       cam_in_ob = cam_in_ob * R_inplane.matrix();
       Eigen::Matrix4f ob_in_cam = cam_in_ob.inverse();

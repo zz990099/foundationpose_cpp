@@ -64,6 +64,10 @@ private:
                   const std::vector<Eigen::MatrixXf>& tfs,
                   float* output_buffer) ;
 
+  bool TransformVertexNormalsOnCUDA(cudaStream_t stream,
+                  const std::vector<Eigen::MatrixXf>& tfs,
+                  float* output_buffer);
+
   bool GeneratePoseClipOnCUDA(cudaStream_t stream,
                       float* output_buffer,
                       const std::vector<Eigen::MatrixXf>& poses, 
@@ -121,6 +125,7 @@ private:
   using DeviceBufferUniquePtrType = std::unique_ptr<T, std::function<void(T*)>>;
 
   DeviceBufferUniquePtrType<float> vertices_device_ {nullptr};
+  DeviceBufferUniquePtrType<float> vertex_normals_device_ {nullptr};
   DeviceBufferUniquePtrType<float> texcoords_device_ {nullptr};
   DeviceBufferUniquePtrType<int32_t> mesh_faces_device_ {nullptr};
   DeviceBufferUniquePtrType<uint8_t> texture_map_device_ {nullptr};
@@ -128,6 +133,8 @@ private:
   DeviceBufferUniquePtrType<float> pose_clip_device_ {nullptr};
   DeviceBufferUniquePtrType<float> rast_out_device_ {nullptr};
   DeviceBufferUniquePtrType<float> pts_cam_device_ {nullptr};
+  DeviceBufferUniquePtrType<float> diffuse_intensity_device_ {nullptr};
+  DeviceBufferUniquePtrType<float> diffuse_intensity_map_device_ {nullptr};
   DeviceBufferUniquePtrType<float> texcoords_out_device_ {nullptr};
   DeviceBufferUniquePtrType<float> color_device_ {nullptr};
   DeviceBufferUniquePtrType<float> xyz_map_device_ {nullptr};

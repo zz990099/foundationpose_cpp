@@ -69,6 +69,13 @@ public:
   const std::vector<aiVector3D> & GetMeshVertices() const noexcept;
 
   /**
+   * @brief 获取mesh模型顶点的法向量
+   * 
+   * @return const std::vector<aiVector3D> &
+   */
+  const std::vector<aiVector3D> & GetMeshVertexNormals() const noexcept;
+
+  /**
    * @brief 获取mesh模型的外观坐标系
    * 
    * @return const std::vector<aiVector3D> &
@@ -114,6 +121,7 @@ private:
   float mesh_diamter_;
   Eigen::Vector3f mesh_center_;
   std::vector<aiVector3D> vertices_;
+  std::vector<aiVector3D> vertex_normals_;
   std::vector<std::vector<aiVector3D>> texcoords_;
   std::vector<aiFace> faces_;
   Eigen::Matrix4f obb_;
