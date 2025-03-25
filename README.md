@@ -7,6 +7,7 @@
 
 ## Update LOG
 
+- [2025.03] 渲染过程与原Python工程对齐，支持无texture纹理输入渲染. [对应PR](https://github.com/zz990099/foundationpose_cpp/pull/13).
 - [2025.03] 添加对Jetson Orin平台支持，[一键配置docker环境](docs/build_enviroment_on_jetson.md)
 
 ## Features
