@@ -1,0 +1,26 @@
+name: pre-commit Checks
+
+on:
+  pull_request:  # 在 PR 时触发
+  push:          # 在推送代码到 main/master 分支时触发
+    branches: [main, master]
+
+jobs:
+  pre-commit:
+    name: Run pre-commit checks
+    runs-on: ubuntu-latest  # 使用 Ubuntu 环境
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4  # 检出代码
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"  # 指定 Python 版本
+
+      - name: Install pre-commit
+        run: pip install pre-commit  # 安装 pre-commit
+
+      - name: Run pre-commit checks
+        run: pre-commit run --all-files  # 运行所有检查
