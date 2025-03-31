@@ -16,4 +16,3 @@ cd ${foundationpose_cpp}/docker/
 bash build_docker.sh --container_type=jetson_trt8
 bash into_docker.sh
 ```
-

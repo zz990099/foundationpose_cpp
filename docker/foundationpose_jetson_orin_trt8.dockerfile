@@ -11,7 +11,7 @@ RUN rm /etc/apt/sources.list && \
     echo "deb https://mirrors.ustc.edu.cn/ubuntu-ports/ jammy-updates main restricted universe multiverse" >> /etc/apt/sources.list && \
     echo "deb https://mirrors.ustc.edu.cn/ubuntu-ports/ jammy-backports main restricted universe multiverse" >> /etc/apt/sources.list && \
     apt-get update
-    
+
 RUN apt install -y \
     build-essential \
     manpages-dev \

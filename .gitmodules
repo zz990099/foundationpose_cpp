@@ -1,0 +1,3 @@
+[submodule "easy_deploy_tool"]
+	path = easy_deploy_tool
+	url = git@github.com:zz990099/EasyDeployTool.git

@@ -19,12 +19,18 @@ jobs:
         -v ${{ github.workspace }}:/workspace
         -w /workspace
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
+    - name: Init Submodule
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive  # 递归初始化所有子模块
+        # 如果子模块是私有仓库，需配置 SSH 密钥
+        ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+    - name: Build Project
       run:
-        cd /workspace && 
-        mkdir build && cd build && 
-        cmake .. && 
+        cd /workspace &&
+        mkdir build && cd build &&
+        cmake .. -DENABLE_TENSORRT=ON &&
         make -j
 
   tensorrt10:
@@ -38,10 +44,16 @@ jobs:
         -v ${{ github.workspace }}:/workspace
         -w /workspace
     steps:
-    - uses: actions/checkout@v4
-    - name: Build the Docker image
+    - name: Init Submodule
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive  # 递归初始化所有子模块
+        # 如果子模块是私有仓库，需配置 SSH 密钥
+        ssh-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+    - name: Build Project
       run:
-        cd /workspace && 
-        mkdir build && cd build && 
-        cmake .. && 
+        cd /workspace &&
+        mkdir build && cd build &&
+        cmake .. -DENABLE_TENSORRT=ON &&
         make -j

@@ -9,7 +9,7 @@
 2. Build docker image
 ```bash
   cd BundleSDF/docker
-  docker build --network host -t nvcr.io/nvidian/bundlesdf . 
+  docker build --network host -t nvcr.io/nvidian/bundlesdf .
 ```
 3. Build docker container
 ```bash
@@ -28,7 +28,7 @@
 
   # fix opengl package missing issue
   pip install PyOpenGL-accelerate
-``` 
+```
 
 ## 2. 准备数据
 
@@ -82,59 +82,59 @@
   import numpy as np
   import cv2
   import os
-  
+
   # 创建管道
   pipeline = rs.pipeline()
   config = rs.config()
-  
+
   # 打开 .bag 文件
   config.enable_device_from_file('/workspace/realsense_bags/20240912_155301.bag')
-  
+
   # 开始管道
   pipeline.start(config)
-  
+
   # 创建对齐对象
   align = rs.align(rs.stream.color)
-  
+
   # 创建输出目录
   depth_output_dir = 'depth'
   color_output_dir = 'rgb'
   os.makedirs(depth_output_dir, exist_ok=True)
   os.makedirs(color_output_dir, exist_ok=True)
-  
+
   try:
       index = 0
       while True:
           # 等待新帧
           frames = pipeline.wait_for_frames()
-  
+
           # 对齐帧
           aligned_frames = align.process(frames)
-  
+
           # 获取对齐后的深度和颜色帧
           depth_frame = aligned_frames.get_depth_frame()
           color_frame = aligned_frames.get_color_frame()
-  
+
           if not depth_frame or not color_frame:
               continue
-  
+
           # 转换为 NumPy 数组
           depth_image = np.asanyarray(depth_frame.get_data())
           color_image = np.asanyarray(color_frame.get_data())
-  
+
           # 将 BGR 转换为 RGB
           color_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
-  
+
           # 保存图像
           cv2.imwrite(os.path.join(depth_output_dir, f'{index:05d}.png'), depth_image)
           cv2.imwrite(os.path.join(color_output_dir, f'{index:05d}.png'), color_image)
-  
+
           index += 1
-  
+
           # 显示图像（可选）
           cv2.imshow('Depth Image', depth_image)
           cv2.imshow('Color Image', color_image)
-  
+
           # 按 'q' 键退出
           if cv2.waitKey(1) & 0xFF == ord('q'):
               break
@@ -187,7 +187,7 @@
 
 ## 3. 使用BundleSDF构建三维模型
 
-运行第一步，最后可能会报错，似乎不用管他: 
+运行第一步，最后可能会报错，似乎不用管他:
 ```bash
   python run_custom.py --mode run_video --video_dir /home/${USER}/projects/BundleSDF/demo_data --out_folder /home/${USER}/projects/BundleSDF/demo_result --use_segmenter 0 --use_gui 0 --debug_level 1
 ```

@@ -9,7 +9,7 @@ find_package(GTest REQUIRED)
 find_package(glog REQUIRED)
 find_package(OpenCV REQUIRED)
 
-set(source_file 
+set(source_file
   src/test_foundationpose.cpp
 )
 
@@ -20,9 +20,9 @@ include_directories(
   ${OpenCV_INCLUDE_DIRS}
 )
 
-add_executable(${PROJECT_NAME} ${source_file})   
+add_executable(${PROJECT_NAME} ${source_file})
 
-target_link_libraries(${PROJECT_NAME} PUBLIC 
+target_link_libraries(${PROJECT_NAME} PUBLIC
   GTest::gtest_main
   glog::glog
   ${OpenCV_LIBS}

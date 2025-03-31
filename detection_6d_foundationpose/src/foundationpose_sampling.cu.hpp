@@ -24,12 +24,23 @@
 #include "cuda.h"
 #include "cuda_runtime.h"
 
-void erode_depth(
-    cudaStream_t stream, float* depth, float* out, int H, int W, int radius = 2, float depth_diff_thres = 0.001,
-    float ratio_thres = 0.8, float zfar = 100);
-void bilateral_filter_depth(
-    cudaStream_t stream, float* depth, float* out, int H, int W, float zfar = 100, int radius = 2, float sigmaD = 2,
-    float sigmaR = 100000);
+void erode_depth(cudaStream_t stream,
+                 float       *depth,
+                 float       *out,
+                 int          H,
+                 int          W,
+                 int          radius           = 2,
+                 float        depth_diff_thres = 0.001,
+                 float        ratio_thres      = 0.8,
+                 float        zfar             = 100);
+void bilateral_filter_depth(cudaStream_t stream,
+                            float       *depth,
+                            float       *out,
+                            int          H,
+                            int          W,
+                            float        zfar   = 100,
+                            int          radius = 2,
+                            float        sigmaD = 2,
+                            float        sigmaR = 100000);
 
-
-#endif  // NVIDIA_ISAAC_ROS_EXTENSIONS_FOUNDATIONPOSE_SAMPLING_CUDA_HPP_
+#endif // NVIDIA_ISAAC_ROS_EXTENSIONS_FOUNDATIONPOSE_SAMPLING_CUDA_HPP_
