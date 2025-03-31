@@ -1,0 +1,30 @@
+repos:
+  # 官方仓库中的基础钩子
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+      - id: check-ast
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-xml
+      - id: check-yaml
+        args: ["--allow-multiple-documents"]
+      - id: debug-statements
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+        exclude_types: [rst]
+      - id: fix-byte-order-marker
+
+  # 运行 Uncrustify 格式化 C/C++ 代码
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: "v20.1.0"  # 指定 clang-format 版本
+    hooks:
+      - id: clang-format
+        name: clang-format (check)
+        args: [--style=file, --dry-run, --Werror]  # 检查模式
+        types: [c, c++]
+        exclude:
+          detection_6d_foundationpose/src/nvdiffrast(/.*)?

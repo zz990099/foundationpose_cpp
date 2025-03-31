@@ -20,9 +20,9 @@
 #include <thrust/device_vector.h>
 #include <thrust/extrema.h>
 
-
 // This function will find the index with the maximum score
-int getMaxScoreIndex(cudaStream_t cuda_stream, float* scores, int N) {
+int getMaxScoreIndex(cudaStream_t cuda_stream, float *scores, int N)
+{
   // Wrap raw pointers with device pointers
   thrust::device_ptr<float> dev_scores(scores);
   // Find the maximum score

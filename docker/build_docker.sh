@@ -14,7 +14,7 @@ usage() {
 
 parse_args() {
   if [ "$#" -ne 1 ]; then
-    usage 
+    usage
   fi
   # 解析参数
   for i in "$@"; do
@@ -35,7 +35,7 @@ is_image_exist() {
   if docker images --filter "reference=$name" \
                    --format "{{.Repository}}:{{.Tag}}" | grep -q "$name"; then
     return 0
-  else 
+  else
     return 1
   fi
 }
@@ -54,7 +54,7 @@ build_nvidia_gpu_trt8_image() {
   if is_image_exist ${BUILT_IMAGE_TAG}; then
     echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
   else
-    docker build -f foundationpose_nvidia_gpu_trt8.dockerfile -t ${BUILT_IMAGE_TAG} . 
+    docker build -f foundationpose_nvidia_gpu_trt8.dockerfile -t ${BUILT_IMAGE_TAG} .
   fi
 }
 
@@ -63,7 +63,7 @@ build_nvidia_gpu_trt10_image() {
   if is_image_exist ${BUILT_IMAGE_TAG}; then
     echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
   else
-    docker build -f foundationpose_nvidia_gpu_trt10.dockerfile -t ${BUILT_IMAGE_TAG} . 
+    docker build -f foundationpose_nvidia_gpu_trt10.dockerfile -t ${BUILT_IMAGE_TAG} .
   fi
 }
 
@@ -72,7 +72,7 @@ build_jetson_trt8_image() {
   if is_image_exist ${BUILT_IMAGE_TAG}; then
     echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
   else
-    docker build -f foundationpose_jetson_orin_trt8.dockerfile -t ${BUILT_IMAGE_TAG} . 
+    docker build -f foundationpose_jetson_orin_trt8.dockerfile -t ${BUILT_IMAGE_TAG} .
   fi
 }
 
@@ -81,7 +81,7 @@ build_jetson_trt10_image() {
   if is_image_exist ${BUILT_IMAGE_TAG}; then
     echo Image: ${BUILT_IMAGE_TAG} exists! Skip image building process ...
   else
-    docker build -f foundationpose_jetson_orin_trt10.dockerfile -t ${BUILT_IMAGE_TAG} . 
+    docker build -f foundationpose_jetson_orin_trt10.dockerfile -t ${BUILT_IMAGE_TAG} .
   fi
 }
 

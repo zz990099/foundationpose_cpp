@@ -25,8 +25,6 @@
 #include "cuda.h"
 #include "cuda_runtime.h"
 
+int getMaxScoreIndex(cudaStream_t cuda_stream, float *scores, int N);
 
-int getMaxScoreIndex(cudaStream_t cuda_stream, float* scores, int N);
-
-
-#endif  // NVIDIA_ISAAC_ROS_EXTENSIONS_FOUNDATIONPOSE_DECODER_CUDA_HPP_
+#endif // NVIDIA_ISAAC_ROS_EXTENSIONS_FOUNDATIONPOSE_DECODER_CUDA_HPP_

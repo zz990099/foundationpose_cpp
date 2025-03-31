@@ -18,36 +18,38 @@
 #include <iostream>
 #include "foundationpose_render.cu.hpp"
 
-
 void RasterizeCudaFwdShaderKernel(const RasterizeCudaFwdShaderParams p);
 void InterpolateFwdKernel(const InterpolateKernelParams p);
 void TextureFwdKernelLinear1(const TextureKernelParams p);
 
-__device__ float clamp_func(float f, float a, float b) {
+__device__ float clamp_func(float f, float a, float b)
+{
   return fmaxf(a, fminf(f, b));
 }
 
-__global__ void clamp_kernel(float* input, float min_value, float max_value, int N) {
+__global__ void clamp_kernel(float *input, float min_value, float max_value, int N)
+{
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
   // Check the boundaries
-  if (idx >= N) {
+  if (idx >= N)
+  {
     return;
   }
   input[idx] = clamp_func(input[idx], min_value, max_value);
 }
 
-namespace foundationpose_render {  
+namespace foundationpose_render {
 
 /*
 This kernel performs:
  1. thresholdingof the point cloud
  2. subtraction of the position of pose array from the pointcloud
  3. downscaling of the point cloud
- 
+
  pose_array_input is of size N*16, where N is the number of poses. 16  = transformation_mat_size
  pointcloud_input is of size N*n_points*3, where N is the number of poses
     and n_points is the number of points in the point cloud.
- 
+
  It subtracts the pose transformation from each point in the cloud,
  1. checks if the z-component of the point is below "min_depth" and sets it to zero if it is
  2. and applies a downscaling factor to reduce the number of points.
@@ -56,12 +58,18 @@ This kernel performs:
 
  The result is stored back in the input array.
 */
-__global__ void threshold_and_downscale_pointcloud_kernel(
-    float* input, float* pose_array_input, int N, int n_points, float downscale_factor,
-    float min_depth, float max_depth) {
+__global__ void threshold_and_downscale_pointcloud_kernel(float *input,
+                                                          float *pose_array_input,
+                                                          int    N,
+                                                          int    n_points,
+                                                          float  downscale_factor,
+                                                          float  min_depth,
+                                                          float  max_depth)
+{
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
-  if (idx >= N * n_points) {
-    return;  // Check the boundaries
+  if (idx >= N * n_points)
+  {
+    return; // Check the boundaries
   }
 
   int pose_idx = idx / n_points;
@@ -78,7 +86,8 @@ __global__ void threshold_and_downscale_pointcloud_kernel(
 
   bool invalid_flag = false;
   // Any points with z below min_depth is set to 0
-  if (input[z_idx] < min_depth) {
+  if (input[z_idx] < min_depth)
+  {
     invalid_flag = true;
   }
 
@@ -92,74 +101,103 @@ __global__ void threshold_and_downscale_pointcloud_kernel(
   input[z_idx] /= downscale_factor;
 
   // Any points with absolute value(x,y or z) above max_depth is set to 0
-  if (fabs(input[x_idx]) > max_depth || invalid_flag) {
+  if (fabs(input[x_idx]) > max_depth || invalid_flag)
+  {
     input[x_idx] = 0.0f;
   }
-  if (fabs(input[y_idx]) > max_depth || invalid_flag) {
+  if (fabs(input[y_idx]) > max_depth || invalid_flag)
+  {
     input[y_idx] = 0.0f;
   }
 
-  if (fabs(input[z_idx]) > max_depth || invalid_flag) {
+  if (fabs(input[z_idx]) > max_depth || invalid_flag)
+  {
     input[z_idx] = 0.0f;
   }
   return;
 }
 
-
 // concat two NHWC array on the last dimension
 __global__ void concat_kernel(
-    float* input_a, float* input_b, float* output, int N, int H, int W, int C1, int C2) {
+    float *input_a, float *input_b, float *output, int N, int H, int W, int C1, int C2)
+{
   int idx = threadIdx.x + blockIdx.x * blockDim.x;
   // Check the boundaries
-  if (idx >= N * H * W) {
+  if (idx >= N * H * W)
+  {
     return;
   }
 
-  for (int i = 0; i < C1; i++) {
+  for (int i = 0; i < C1; i++)
+  {
     output[idx * (C1 + C2) + i] = input_a[idx * C1 + i];
   }
 
-  for (int i = 0; i < C2; i++) {
+  for (int i = 0; i < C2; i++)
+  {
     output[idx * (C1 + C2) + C1 + i] = input_b[idx * C2 + i];
   }
 }
 
-
-void clamp(cudaStream_t stream, float* input, float min_value, float max_value, int N) {
+void clamp(cudaStream_t stream, float *input, float min_value, float max_value, int N)
+{
   int block_size = 256;
-  int grid_size = (N + block_size - 1) / block_size;
+  int grid_size  = (N + block_size - 1) / block_size;
 
   clamp_kernel<<<grid_size, block_size, 0, stream>>>(input, min_value, max_value, N);
 }
 
-void threshold_and_downscale_pointcloud(
-    cudaStream_t stream, float* pointcloud_input, float* pose_array_input, int N, int n_points, float downscale_factor,
-    float min_depth, float max_depth) {
+void threshold_and_downscale_pointcloud(cudaStream_t stream,
+                                        float       *pointcloud_input,
+                                        float       *pose_array_input,
+                                        int          N,
+                                        int          n_points,
+                                        float        downscale_factor,
+                                        float        min_depth,
+                                        float        max_depth)
+{
   // Launch n_points threads
   int block_size = 256;
-  int grid_size = ((N * n_points) + block_size - 1) / block_size;
+  int grid_size  = ((N * n_points) + block_size - 1) / block_size;
 
   threshold_and_downscale_pointcloud_kernel<<<grid_size, block_size, 0, stream>>>(
       pointcloud_input, pose_array_input, N, n_points, downscale_factor, min_depth, max_depth);
 }
 
-void concat(cudaStream_t stream, float* input_a, float* input_b, float* output, int N, int H, int W, int C1, int C2) {
+void concat(cudaStream_t stream,
+            float       *input_a,
+            float       *input_b,
+            float       *output,
+            int          N,
+            int          H,
+            int          W,
+            int          C1,
+            int          C2)
+{
   // Launch N*H*W threads, each thread handle a vector of size C
   int block_size = 256;
-  int grid_size = (N * H * W + block_size - 1) / block_size;
+  int grid_size  = (N * H * W + block_size - 1) / block_size;
 
   concat_kernel<<<grid_size, block_size>>>(input_a, input_b, output, N, H, W, C1, C2);
 }
 
-void rasterize(
-    cudaStream_t stream, CR::CudaRaster* cr, float* pos_ptr, int32_t* tri_ptr, float* out, int pos_count, int tri_count,
-    int H, int W, int C) {
-  const int32_t* range_ptr = 0;
+void rasterize(cudaStream_t    stream,
+               CR::CudaRaster *cr,
+               float          *pos_ptr,
+               int32_t        *tri_ptr,
+               float          *out,
+               int             pos_count,
+               int             tri_count,
+               int             H,
+               int             W,
+               int             C)
+{
+  const int32_t *range_ptr = 0;
 
   bool enablePeel = false;
   cr->setViewportSize(W, H, C);
-  cr->setVertexBuffer((void*)pos_ptr, pos_count);
-  cr->setIndexBuffer((void*)tri_ptr, tri_count);
+  cr->setVertexBuffer((void *)pos_ptr, pos_count);
+  cr->setIndexBuffer((void *)tri_ptr, tri_count);
   cr->setRenderModeFlags(0);
 
   cr->deferredClear(0u);
@@ -167,157 +205,188 @@ void rasterize(
 
   // Populate pixel shader kernel parameters.
   RasterizeCudaFwdShaderParams p;
-  p.pos = pos_ptr;
-  p.tri = tri_ptr;
-  p.in_idx = (const int*)cr->getColorBuffer();
-  p.out = out;
+  p.pos          = pos_ptr;
+  p.tri          = tri_ptr;
+  p.in_idx       = (const int *)cr->getColorBuffer();
+  p.out          = out;
   p.numTriangles = tri_count;
-  p.numVertices = pos_count;
-  p.width = W;
-  p.height = H;
-  p.depth = C;
+  p.numVertices  = pos_count;
+  p.width        = W;
+  p.height       = H;
+  p.depth        = C;
 
   p.instance_mode = 1;
-  p.xs = 2.f / (float)p.width;
-  p.xo = 1.f / (float)p.width - 1.f;
-  p.ys = 2.f / (float)p.height;
-  p.yo = 1.f / (float)p.height - 1.f;
+  p.xs            = 2.f / (float)p.width;
+  p.xo            = 1.f / (float)p.width - 1.f;
+  p.ys            = 2.f / (float)p.height;
+  p.yo            = 1.f / (float)p.height - 1.f;
 
   // Choose launch parameters.
-  dim3 blockSize = getLaunchBlockSize(
-      RAST_CUDA_FWD_SHADER_KERNEL_BLOCK_WIDTH, RAST_CUDA_FWD_SHADER_KERNEL_BLOCK_HEIGHT, p.width,
-      p.height);
-  dim3 gridSize = getLaunchGridSize(blockSize, p.width, p.height, p.depth);
+  dim3 blockSize = getLaunchBlockSize(RAST_CUDA_FWD_SHADER_KERNEL_BLOCK_WIDTH,
+                                      RAST_CUDA_FWD_SHADER_KERNEL_BLOCK_HEIGHT, p.width, p.height);
+  dim3 gridSize  = getLaunchGridSize(blockSize, p.width, p.height, p.depth);
 
   // Launch CUDA kernel.
-  void* args[] = {&p};
-  cudaLaunchKernel((void*)RasterizeCudaFwdShaderKernel, gridSize, blockSize, args, 0, stream);
+  void *args[] = {&p};
+  cudaLaunchKernel((void *)RasterizeCudaFwdShaderKernel, gridSize, blockSize, args, 0, stream);
 }
 
-void interpolate(
-    cudaStream_t stream, float* attr_ptr, float* rast_ptr, int32_t* tri_ptr, float* out, int num_vertices,
-    int num_triangles, int attr_shape_dim, int attr_dim, int H, int W, int C) {
+void interpolate(cudaStream_t stream,
+                 float       *attr_ptr,
+                 float       *rast_ptr,
+                 int32_t     *tri_ptr,
+                 float       *out,
+                 int          num_vertices,
+                 int          num_triangles,
+                 int          attr_shape_dim,
+                 int          attr_dim,
+                 int          H,
+                 int          W,
+                 int          C)
+{
   int instance_mode = attr_shape_dim > 2 ? 1 : 0;
 
-  InterpolateKernelParams p = {};  // Initialize all fields to zero.
-  p.instance_mode = instance_mode;
-  p.numVertices = num_vertices;
-  p.numAttr = attr_dim;
-  p.numTriangles = num_triangles;
-  p.height = H;
-  p.width = W;
-  p.depth = C;
+  InterpolateKernelParams p = {}; // Initialize all fields to zero.
+  p.instance_mode           = instance_mode;
+  p.numVertices             = num_vertices;
+  p.numAttr                 = attr_dim;
+  p.numTriangles            = num_triangles;
+  p.height                  = H;
+  p.width                   = W;
+  p.depth                   = C;
 
   // Get input pointers.
-  p.attr = attr_ptr;
-  p.rast = rast_ptr;
-  p.tri = tri_ptr;
+  p.attr   = attr_ptr;
+  p.rast   = rast_ptr;
+  p.tri    = tri_ptr;
   p.attrBC = 0;
-  p.out = out;
+  p.out    = out;
 
   // Choose launch parameters.
-  dim3 blockSize = getLaunchBlockSize(
-      IP_FWD_MAX_KERNEL_BLOCK_WIDTH, IP_FWD_MAX_KERNEL_BLOCK_HEIGHT, p.width, p.height);
-  dim3 gridSize = getLaunchGridSize(blockSize, p.width, p.height, p.depth);
+  dim3 blockSize = getLaunchBlockSize(IP_FWD_MAX_KERNEL_BLOCK_WIDTH, IP_FWD_MAX_KERNEL_BLOCK_HEIGHT,
+                                      p.width, p.height);
+  dim3 gridSize  = getLaunchGridSize(blockSize, p.width, p.height, p.depth);
 
   // Launch CUDA kernel.
-  void* args[] = {&p};
-  void* func = (void*)InterpolateFwdKernel;
+  void *args[] = {&p};
+  void *func   = (void *)InterpolateFwdKernel;
   cudaLaunchKernel(func, gridSize, blockSize, args, 0, stream);
 }
 
-void texture(
-    cudaStream_t stream, float* tex_ptr, float* uv_ptr, float* out, int tex_height, int tex_width, int tex_channel,
-    int tex_depth, int H, int W, int N) {
-  TextureKernelParams p = {};  // Initialize all fields to zero.
-  p.enableMip = false;
-  p.filterMode = TEX_MODE_LINEAR;
-  p.boundaryMode = TEX_BOUNDARY_MODE_WRAP;
+void texture(cudaStream_t stream,
+             float       *tex_ptr,
+             float       *uv_ptr,
+             float       *out,
+             int          tex_height,
+             int          tex_width,
+             int          tex_channel,
+             int          tex_depth,
+             int          H,
+             int          W,
+             int          N)
+{
+  TextureKernelParams p = {}; // Initialize all fields to zero.
+  p.enableMip           = false;
+  p.filterMode          = TEX_MODE_LINEAR;
+  p.boundaryMode        = TEX_BOUNDARY_MODE_WRAP;
 
-  p.texDepth = tex_depth;
+  p.texDepth  = tex_depth;
   p.texHeight = tex_height;
-  p.texWidth = tex_width;
-  p.channels = tex_channel;
+  p.texWidth  = tex_width;
+  p.channels  = tex_channel;
 
-  p.n = N;
+  p.n         = N;
   p.imgHeight = H;
-  p.imgWidth = W;
+  p.imgWidth  = W;
 
   // Get input pointers.
-  p.tex[0] = tex_ptr;
-  p.uv = uv_ptr;
+  p.tex[0]       = tex_ptr;
+  p.uv           = uv_ptr;
   p.mipLevelBias = NULL;
 
   p.out = out;
 
   // Choose kernel variants based on channel count.
-  void* args[] = {&p};
+  void *args[] = {&p};
 
   // Choose launch parameters for texture lookup kernel.
-  dim3 blockSize = getLaunchBlockSize(
-      TEX_FWD_MAX_KERNEL_BLOCK_WIDTH, TEX_FWD_MAX_KERNEL_BLOCK_HEIGHT, p.imgWidth, p.imgHeight);
-  dim3 gridSize = getLaunchGridSize(blockSize, p.imgWidth, p.imgHeight, p.n);
+  dim3 blockSize = getLaunchBlockSize(TEX_FWD_MAX_KERNEL_BLOCK_WIDTH,
+                                      TEX_FWD_MAX_KERNEL_BLOCK_HEIGHT, p.imgWidth, p.imgHeight);
+  dim3 gridSize  = getLaunchGridSize(blockSize, p.imgWidth, p.imgHeight, p.n);
 
-  void* func = (void*)TextureFwdKernelLinear1;
+  void *func = (void *)TextureFwdKernelLinear1;
   cudaLaunchKernel(func, gridSize, blockSize, args, 0, stream);
 }
 
-__global__ void transform_points_kernel(
-    const float* transform_matrixs, int M, const float* points_vectors, 
-    int N, float* transformed_points_vectors)
+__global__ void transform_points_kernel(const float *transform_matrixs,
+                                        int          M,
+                                        const float *points_vectors,
+                                        int          N,
+                                        float       *transformed_points_vectors)
 {
   int row_idx = threadIdx.y + blockIdx.y * blockDim.y;
   int col_idx = threadIdx.x + blockIdx.x * blockDim.x;
-  if (row_idx >= M || col_idx >= N) return;
+  if (row_idx >= M || col_idx >= N)
+    return;
 
-  const float* matrix = transform_matrixs + row_idx * 16;  // 指向当前 4x4 变换矩阵
-  const float* point = points_vectors + col_idx * 3;       // 指向当前 3D 点
-  float* transformed_point = transformed_points_vectors + (row_idx * N + col_idx) * 3;
+  const float *matrix            = transform_matrixs + row_idx * 16; // 指向当前 4x4 变换矩阵
+  const float *point             = points_vectors + col_idx * 3;     // 指向当前 3D 点
+  float       *transformed_point = transformed_points_vectors + (row_idx * N + col_idx) * 3;
 
   float x = point[0], y = point[1], z = point[2];
   // **Column-Major 访问方式**
-  transformed_point[0] = matrix[0] * x + matrix[4] * y + matrix[8]  * z + matrix[12];
-  transformed_point[1] = matrix[1] * x + matrix[5] * y + matrix[9]  * z + matrix[13];
+  transformed_point[0] = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+  transformed_point[1] = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
   transformed_point[2] = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
 }
 
-static uint16_t ceil_div(uint16_t numerator, uint16_t denominator) {
+static uint16_t ceil_div(uint16_t numerator, uint16_t denominator)
+{
   uint32_t accumulator = numerator + denominator - 1;
   return accumulator / denominator + 1;
 }
 
-void transform_points(cudaStream_t stream, const float* transform_matrixs, int M, const float* points_vectors, 
-    int N, float* transformed_points_vectors)
+void transform_points(cudaStream_t stream,
+                      const float *transform_matrixs,
+                      int          M,
+                      const float *points_vectors,
+                      int          N,
+                      float       *transformed_points_vectors)
 {
   dim3 blockSize = {32, 32};
-  dim3 gridSize = {ceil_div(N, 32), ceil_div(M, 32)};
+  dim3 gridSize  = {ceil_div(N, 32), ceil_div(M, 32)};
 
-  transform_points_kernel<<<gridSize, blockSize, 0, stream>>>(
-      transform_matrixs, M, points_vectors, N, transformed_points_vectors);
+  transform_points_kernel<<<gridSize, blockSize, 0, stream>>>(transform_matrixs, M, points_vectors,
+                                                              N, transformed_points_vectors);
 }
 
-__global__ void generate_pose_clip_kernel(
-    const float* transform_matrixs, const float* bbox2d_matrixs, int M, const float* points_vectors, 
-    int N, float* transformed_points_vectors, int rgb_H, int rgb_W)
+__global__ void generate_pose_clip_kernel(const float *transform_matrixs,
+                                          const float *bbox2d_matrixs,
+                                          int          M,
+                                          const float *points_vectors,
+                                          int          N,
+                                          float       *transformed_points_vectors,
+                                          int          rgb_H,
+                                          int          rgb_W)
 {
   int row_idx = threadIdx.y + blockIdx.y * blockDim.y;
   int col_idx = threadIdx.x + blockIdx.x * blockDim.x;
-  if (row_idx >= M || col_idx >= N) return;
+  if (row_idx >= M || col_idx >= N)
+    return;
 
-  const float* matrix = transform_matrixs + row_idx * 16;  // 指向当前 4x4 变换矩阵
-  const float* bbox2d = bbox2d_matrixs + row_idx * 4;      // 指向当前 4x1 bbox2d向量
-  const float* point = points_vectors + col_idx * 3;       // 指向当前 3D 点
-  float* transformed_point = transformed_points_vectors + (row_idx * N + col_idx) * 4;
-
+  const float *matrix            = transform_matrixs + row_idx * 16; // 指向当前 4x4 变换矩阵
+  const float *bbox2d            = bbox2d_matrixs + row_idx * 4;     // 指向当前 4x1 bbox2d向量
+  const float *point             = points_vectors + col_idx * 3;     // 指向当前 3D 点
+  float       *transformed_point = transformed_points_vectors + (row_idx * N + col_idx) * 4;
 
   float l = bbox2d[0], t = rgb_H - bbox2d[1], r = bbox2d[2], b = rgb_H - bbox2d[3];
-  float a00 = rgb_W / (r - l),           a11 = rgb_H / (t - b), 
-        a30 = (rgb_W - r - l) / (r - l), a31 = (rgb_H - t - b) / (t - b);
+  float a00 = rgb_W / (r - l), a11 = rgb_H / (t - b), a30 = (rgb_W - r - l) / (r - l),
+        a31 = (rgb_H - t - b) / (t - b);
   float x = point[0], y = point[1], z = point[2];
 
   // 1. 坐标变换
-  float tx = matrix[0] * x + matrix[4] * y + matrix[8]  * z + matrix[12];
-  float ty = matrix[1] * x + matrix[5] * y + matrix[9]  * z + matrix[13];
+  float tx = matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12];
+  float ty = matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13];
   float tz = matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14];
   float tw = matrix[3] * x + matrix[7] * y + matrix[11] * z + matrix[15];
 
@@ -328,99 +397,126 @@ __global__ void generate_pose_clip_kernel(
   transformed_point[3] = tw;
 }
 
-
-void generate_pose_clip(cudaStream_t stream, const float* transform_matrixs, const float* bbox2d_matrix, 
-        int M, const float* points_vectors, int N, float* transformed_points_vectors, int rgb_H, int rgb_W)
+void generate_pose_clip(cudaStream_t stream,
+                        const float *transform_matrixs,
+                        const float *bbox2d_matrix,
+                        int          M,
+                        const float *points_vectors,
+                        int          N,
+                        float       *transformed_points_vectors,
+                        int          rgb_H,
+                        int          rgb_W)
 {
   dim3 blockSize = {32, 32};
-  dim3 gridSize = {ceil_div(N, 32), ceil_div(M, 32)};
+  dim3 gridSize  = {ceil_div(N, 32), ceil_div(M, 32)};
 
   generate_pose_clip_kernel<<<gridSize, blockSize, 0, stream>>>(
-      transform_matrixs, bbox2d_matrix, M, points_vectors, N, transformed_points_vectors, rgb_H, rgb_W);
+      transform_matrixs, bbox2d_matrix, M, points_vectors, N, transformed_points_vectors, rgb_H,
+      rgb_W);
 }
 
-
-__global__ void transform_normals_kernel(
-    const float* transform_matrixs, int M, const float* normals_vectors, 
-    int N, float* transformed_normal_vectors)
+__global__ void transform_normals_kernel(const float *transform_matrixs,
+                                         int          M,
+                                         const float *normals_vectors,
+                                         int          N,
+                                         float       *transformed_normal_vectors)
 {
   int row_idx = threadIdx.y + blockIdx.y * blockDim.y;
   int col_idx = threadIdx.x + blockIdx.x * blockDim.x;
-  if (row_idx >= M || col_idx >= N) return;
+  if (row_idx >= M || col_idx >= N)
+    return;
 
-  const float* matrix = transform_matrixs + row_idx * 16;  // 指向当前 4x4 变换矩阵
-  const float* normal = normals_vectors + col_idx * 3;       // 指向当前 normal 向量
-  float* transformed_normal = transformed_normal_vectors + (row_idx * N + col_idx);
+  const float *matrix             = transform_matrixs + row_idx * 16; // 指向当前 4x4 变换矩阵
+  const float *normal             = normals_vectors + col_idx * 3;    // 指向当前 normal 向量
+  float       *transformed_normal = transformed_normal_vectors + (row_idx * N + col_idx);
 
   float x = normal[0], y = normal[1], z = normal[2];
   // **Column-Major 访问方式**
-  float tx = matrix[0] * x + matrix[4] * y + matrix[8]  * z;
-  float ty = matrix[1] * x + matrix[5] * y + matrix[9]  * z;
+  float tx = matrix[0] * x + matrix[4] * y + matrix[8] * z;
+  float ty = matrix[1] * x + matrix[5] * y + matrix[9] * z;
   float tz = matrix[2] * x + matrix[6] * y + matrix[10] * z;
   // 只保留z方向的分量，取反
-  float l2 = sqrt(tx*tx + ty*ty + tz*tz);
-  float value = l2 == 0 ? 0 : - tz / l2;
-  value = clamp_func(value, 0, 1);
+  float l2              = sqrt(tx * tx + ty * ty + tz * tz);
+  float value           = l2 == 0 ? 0 : -tz / l2;
+  value                 = clamp_func(value, 0, 1);
   transformed_normal[0] = value;
 }
 
-void transform_normals(cudaStream_t stream, const float* transform_matrixs, int M, const float* normals_vectors, 
-    int N, float* transformed_normal_vectors)
+void transform_normals(cudaStream_t stream,
+                       const float *transform_matrixs,
+                       int          M,
+                       const float *normals_vectors,
+                       int          N,
+                       float       *transformed_normal_vectors)
 {
   dim3 blockSize = {32, 32};
-  dim3 gridSize = {ceil_div(N, 32), ceil_div(M, 32)};
+  dim3 gridSize  = {ceil_div(N, 32), ceil_div(M, 32)};
 
   transform_normals_kernel<<<gridSize, blockSize, 0, stream>>>(
       transform_matrixs, M, normals_vectors, N, transformed_normal_vectors);
 }
 
-
-__global__ void renfine_color_kernel(
-    const float* color, const float* diffuse_intensity_map, const float* rast_out, float* output, int poses_num, float w_ambient, 
-    float w_diffuse, int rgb_H, int rgb_W)
+__global__ void renfine_color_kernel(const float *color,
+                                     const float *diffuse_intensity_map,
+                                     const float *rast_out,
+                                     float       *output,
+                                     int          poses_num,
+                                     float        w_ambient,
+                                     float        w_diffuse,
+                                     int          rgb_H,
+                                     int          rgb_W)
 {
   int row_idx = threadIdx.y + blockIdx.y * blockDim.y;
   int col_idx = threadIdx.x + blockIdx.x * blockDim.x;
-  if (row_idx >= rgb_H || col_idx >= rgb_W * poses_num) return;
+  if (row_idx >= rgb_H || col_idx >= rgb_W * poses_num)
+    return;
 
-  const int color_idx = col_idx / rgb_W;
+  const int color_idx     = col_idx / rgb_W;
   const int color_row_idx = row_idx;
   const int color_col_idx = col_idx - color_idx * rgb_W;
 
-  const size_t pixel_idx = color_row_idx * rgb_W + color_col_idx;
+  const size_t pixel_idx    = color_row_idx * rgb_W + color_col_idx;
   const size_t pixel_offset = color_idx * rgb_H * rgb_W + pixel_idx;
 
-  const float* rgb = color + pixel_offset * 3;
-  const float* diffuse = diffuse_intensity_map + pixel_offset;
-  const float* rast = rast_out + pixel_offset * 4;
-  float* out = output + pixel_offset * 3;
+  const float *rgb     = color + pixel_offset * 3;
+  const float *diffuse = diffuse_intensity_map + pixel_offset;
+  const float *rast    = rast_out + pixel_offset * 4;
+  float       *out     = output + pixel_offset * 3;
 
   float diff = diffuse[0];
 
   float is_foreground = clamp_func(rast[3], 0, 1);
 
-  float r = rgb[0] * (w_ambient + diff*w_diffuse) * is_foreground;
-  float g = rgb[1] * (w_ambient + diff*w_diffuse) * is_foreground;
-  float b = rgb[2] * (w_ambient + diff*w_diffuse) * is_foreground;
+  float r = rgb[0] * (w_ambient + diff * w_diffuse) * is_foreground;
+  float g = rgb[1] * (w_ambient + diff * w_diffuse) * is_foreground;
+  float b = rgb[2] * (w_ambient + diff * w_diffuse) * is_foreground;
 
   r = clamp_func(r, 0, 1);
   g = clamp_func(g, 0, 1);
   b = clamp_func(b, 0, 1);
-  
+
   out[0] = r;
   out[1] = g;
   out[2] = b;
 }
 
-void refine_color(cudaStream_t stream, const float* color, const float* diffuse_intensity_map, const float* rast_out, float* output,
-        int poses_num, float w_ambient, float w_diffuse, int rgb_H, int rgb_W)
+void refine_color(cudaStream_t stream,
+                  const float *color,
+                  const float *diffuse_intensity_map,
+                  const float *rast_out,
+                  float       *output,
+                  int          poses_num,
+                  float        w_ambient,
+                  float        w_diffuse,
+                  int          rgb_H,
+                  int          rgb_W)
 {
   dim3 blockSize = {32, 32};
-  dim3 gridSize = {ceil_div(rgb_W * poses_num, 32), ceil_div(rgb_H, 32)};
+  dim3 gridSize  = {ceil_div(rgb_W * poses_num, 32), ceil_div(rgb_H, 32)};
 
-  renfine_color_kernel<<<gridSize, blockSize, 0, stream>>>(
-    color, diffuse_intensity_map, rast_out, output, poses_num, w_ambient, w_diffuse, rgb_H, rgb_W
-  );
+  renfine_color_kernel<<<gridSize, blockSize, 0, stream>>>(color, diffuse_intensity_map, rast_out,
+                                                           output, poses_num, w_ambient, w_diffuse,
+                                                           rgb_H, rgb_W);
 }
 
-}   // namespace foundationpose_render
+} // namespace foundationpose_render
