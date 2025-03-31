@@ -48,7 +48,15 @@
 
 ### Enviroment Build
 
-1. 使用`docker`来构建运行环境
+1. 下载`foundationpose_cpp`repo
+```bash
+git clone git@github.com:zz990099/foundationpose_cpp.git
+cd foundationpose_cpp
+git submodule init
+git submodule update
+```
+
+2. 使用`docker`来构建运行环境
   ```bash
     cd ${foundationpose_cpp}/docker
     bash build_docker.sh --container_type=trt8 # trt10, jetson_trt8, jetson_trt10
@@ -71,7 +79,7 @@
   ```bash
     cd /workspace
     mkdir build && cd build
-    cmake ..
+    cmake -DENABLE_TENSORRT=ON ..
     make -j
   ```
 
