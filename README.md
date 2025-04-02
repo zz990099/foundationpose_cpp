@@ -58,9 +58,10 @@ git submodule update
 
 2. 使用`docker`来构建运行环境
   ```bash
-    cd ${foundationpose_cpp}/docker
-    bash build_docker.sh --container_type=trt8 # trt10, jetson_trt8, jetson_trt10
-    bash into_docker.sh
+    cd ${foundationpose_cpp}
+    bash easy_deploy_tool/docker/easy_deploy_startup.sh
+    # choose `jetson` -> `trt10_u2204`/`trt8_u2204` (`trt8_u2004` will not work)
+    bash easy_deploy_tool/docker/into_docker.sh
   ```
 
 ### Convert Models
