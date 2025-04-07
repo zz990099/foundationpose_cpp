@@ -18,7 +18,7 @@ static const std::string demo_textured_map_path = demo_data_path_ + "/mesh/textu
 static const std::string demo_name_             = "mustard";
 static const std::string frame_id               = "1581120424100262102";
 
-std::shared_ptr<Base6DofDetectionModel> CreateFoundationPoseModel()
+std::tuple<std::shared_ptr<Base6DofDetectionModel>, std::shared_ptr<BaseMeshLoader>> CreateModel()
 {
   auto refiner_core = CreateTrtInferCore(refiner_engine_path_,
                                          {
@@ -35,17 +35,19 @@ std::shared_ptr<Base6DofDetectionModel> CreateFoundationPoseModel()
 
   Eigen::Matrix3f intrinsic_in_mat = ReadCamK(demo_data_path_ + "/cam_K.txt");
 
-  auto foundation_pose =
-      CreateFoundationPoseModel(refiner_core, scorer_core, demo_name_, demo_textured_obj_path,
-                                demo_textured_map_path, intrinsic_in_mat);
+  auto mesh_loader = CreateAssimpMeshLoader(demo_name_, demo_textured_obj_path);
+  CHECK(mesh_loader != nullptr);
 
-  return foundation_pose;
+  auto foundation_pose =
+      CreateFoundationPoseModel(refiner_core, scorer_core, {mesh_loader}, intrinsic_in_mat);
+
+  return {foundation_pose, mesh_loader};
 }
 
 TEST(foundationpose_test, test)
 {
-  auto            foundation_pose  = CreateFoundationPoseModel();
-  Eigen::Matrix3f intrinsic_in_mat = ReadCamK(demo_data_path_ + "/cam_K.txt");
+  auto [foundation_pose, mesh_loader] = CreateModel();
+  Eigen::Matrix3f intrinsic_in_mat    = ReadCamK(demo_data_path_ + "/cam_K.txt");
 
   const std::string first_rgb_path   = demo_data_path_ + "/rgb/" + frame_id + ".png";
   const std::string first_depth_path = demo_data_path_ + "/depth/" + frame_id + ".png";
@@ -53,7 +55,7 @@ TEST(foundationpose_test, test)
 
   auto [rgb, depth, mask] = ReadRgbDepthMask(first_rgb_path, first_depth_path, first_mask_path);
 
-  const Eigen::Vector3f object_dimension = foundation_pose->GetObjectDimension(demo_name_);
+  const Eigen::Vector3f object_dimension = mesh_loader->GetObjectDimension();
 
   Eigen::Matrix4f out_pose;
   CHECK(foundation_pose->Register(rgb.clone(), depth, mask, demo_name_, out_pose));
@@ -62,7 +64,8 @@ TEST(foundationpose_test, test)
   // [temp] for test
   cv::Mat regist_plot = rgb.clone();
   cv::cvtColor(regist_plot, regist_plot, cv::COLOR_RGB2BGR);
-  draw3DBoundingBox(intrinsic_in_mat, out_pose, 480, 640, object_dimension, regist_plot);
+  auto draw_pose = ConvertPoseMesh2BBox(out_pose, mesh_loader);
+  draw3DBoundingBox(intrinsic_in_mat, draw_pose, 480, 640, object_dimension, regist_plot);
   cv::imwrite("/workspace/test_data/test_foundationpose_plot.png", regist_plot);
 
   auto rgb_paths = get_files_in_directory(demo_data_path_ + "/rgb/");
@@ -82,15 +85,18 @@ TEST(foundationpose_test, test)
     auto [cur_rgb, cur_depth]  = ReadRgbDepth(cur_rgb_path, cur_depth_path);
 
     Eigen::Matrix4f track_pose;
-    CHECK(foundation_pose->Track(cur_rgb.clone(), cur_depth, demo_name_, track_pose));
+    CHECK(foundation_pose->Track(cur_rgb.clone(), cur_depth, out_pose, demo_name_, track_pose));
     LOG(WARNING) << "Track pose : " << track_pose;
 
     cv::Mat track_plot = cur_rgb.clone();
     cv::cvtColor(track_plot, track_plot, cv::COLOR_RGB2BGR);
-    draw3DBoundingBox(intrinsic_in_mat, track_pose, 480, 640, object_dimension, track_plot);
+    auto draw_pose = ConvertPoseMesh2BBox(track_pose, mesh_loader);
+    draw3DBoundingBox(intrinsic_in_mat, draw_pose, 480, 640, object_dimension, track_plot);
     cv::imshow("test_foundationpose_result", track_plot);
     cv::waitKey(20);
     result_image_sequence.push_back(track_plot);
+
+    out_pose = track_pose;
   }
 
   saveVideo(result_image_sequence, "/workspace/test_data/test_foundationpose_result.mp4");
@@ -98,8 +104,8 @@ TEST(foundationpose_test, test)
 
 TEST(foundationpose_test, speed_register)
 {
-  auto            foundation_pose  = CreateFoundationPoseModel();
-  Eigen::Matrix3f intrinsic_in_mat = ReadCamK(demo_data_path_ + "/cam_K.txt");
+  auto [foundation_pose, mesh_loader] = CreateModel();
+  Eigen::Matrix3f intrinsic_in_mat    = ReadCamK(demo_data_path_ + "/cam_K.txt");
 
   const std::string first_rgb_path   = demo_data_path_ + "/rgb/" + frame_id + ".png";
   const std::string first_depth_path = demo_data_path_ + "/depth/" + frame_id + ".png";
@@ -122,8 +128,8 @@ TEST(foundationpose_test, speed_register)
 
 TEST(foundationpose_test, speed_track)
 {
-  auto            foundation_pose  = CreateFoundationPoseModel();
-  Eigen::Matrix3f intrinsic_in_mat = ReadCamK(demo_data_path_ + "/cam_K.txt");
+  auto [foundation_pose, mesh_loader] = CreateModel();
+  Eigen::Matrix3f intrinsic_in_mat    = ReadCamK(demo_data_path_ + "/cam_K.txt");
 
   const std::string first_rgb_path   = demo_data_path_ + "/rgb/" + frame_id + ".png";
   const std::string first_depth_path = demo_data_path_ + "/depth/" + frame_id + ".png";
@@ -140,7 +146,7 @@ TEST(foundationpose_test, speed_track)
   for (int i = 0; i < 5000; ++i)
   {
     Eigen::Matrix4f track_pose;
-    foundation_pose->Track(rgb.clone(), depth, demo_name_, track_pose);
+    foundation_pose->Track(rgb.clone(), depth, first_pose, demo_name_, track_pose);
     counter.Count(1);
   }
 

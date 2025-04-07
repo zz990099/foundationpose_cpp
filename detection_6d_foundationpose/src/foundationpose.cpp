@@ -1,53 +1,22 @@
 #include "detection_6d_foundationpose/foundationpose.hpp"
+#include "detection_6d_foundationpose/mesh_loader.hpp"
 
 #include "foundationpose_render.hpp"
 #include "foundationpose_sampling.hpp"
 #include "foundationpose_utils.hpp"
-#include "foundationpose_decoder.hpp"
+#include "foundationpose_decoder.cu.hpp"
 #include "foundationpose_utils.cu.hpp"
-
-#define MAX_INPUT_IMAGE_HEIGHT 1080
-#define MAX_INPUT_IMAGE_WIDTH 1920
 
 namespace detection_6d {
 
 class FoundationPose : public Base6DofDetectionModel {
 public:
   /**
-   * @brief 使用单个目标的mesh构建一个FoundationPose实例
-   *
-   * @param refiner_core refiner的推理核心
-   * @param scorer_core scorer的推理核心
-   * @param mesh_file_path 目标的mesh文件路径
-   * @param texture_file_path 目标的外观特征图像路径
-   * @param intrinsic 相机内参
-   * @param input_image_H 输入图像高度，默认480
-   * @param input_image_W 输入图像宽度，默认640
-   * @param crop_window_H 模型的输入图像高度，默认160
-   * @param crop_window_W 模型的输入图像宽度，默认160
-   * @param min_depth 有效深度最小值
-   * @param max_depth 有效深度最大值
-   */
-  FoundationPose(std::shared_ptr<inference_core::BaseInferCore> refiner_core,
-                 std::shared_ptr<inference_core::BaseInferCore> scorer_core,
-                 const std::string                             &target_name,
-                 const std::string                             &mesh_file_path,
-                 const std::string                             &texture_file_path,
-                 const Eigen::Matrix3f                         &intrinsic,
-                 const int   input_image_H = MAX_INPUT_IMAGE_HEIGHT,
-                 const int   input_image_W = MAX_INPUT_IMAGE_WIDTH,
-                 const int   crop_window_H = 160,
-                 const int   crop_window_W = 160,
-                 const float min_depth     = 0.1,
-                 const float max_depth     = 4.0);
-
-  /**
    * @brief 使用多个目标的mesh构建一个FoundationPose实例
    *
    * @param refiner_core refiner的推理核心
    * @param scorer_core scorer的推理核心
-   * @param meshes 多个目标的mesh/texture路径map: [name] -> [mesh_file_path, texture_file_path]，
-   *                键值[name]在后续检测过程中用于辨别特定种类目标，**保持一致**
+   * @param mesh_loaders 注册的三维模型
    * @param intrinsic 相机内参
    * @param input_image_H 输入图像高度，默认480
    * @param input_image_W 输入图像宽度，默认640
@@ -56,29 +25,28 @@ public:
    * @param min_depth 有效深度最小值
    * @param max_depth 有效深度最大值
    */
-  FoundationPose(std::shared_ptr<inference_core::BaseInferCore> refiner_core,
-                 std::shared_ptr<inference_core::BaseInferCore> scorer_core,
-                 const std::unordered_map<std::string, std::pair<std::string, std::string>> &meshes,
-                 const Eigen::Matrix3f &intrinsic,
-                 const int              max_input_image_H = MAX_INPUT_IMAGE_HEIGHT,
-                 const int              max_input_image_W = MAX_INPUT_IMAGE_WIDTH,
-                 const int              crop_window_H     = 160,
-                 const int              crop_window_W     = 160,
-                 const float            min_depth         = 0.1,
-                 const float            max_depth         = 4.0);
+  FoundationPose(std::shared_ptr<inference_core::BaseInferCore>      refiner_core,
+                 std::shared_ptr<inference_core::BaseInferCore>      scorer_core,
+                 const std::vector<std::shared_ptr<BaseMeshLoader>> &mesh_loaders,
+                 const Eigen::Matrix3f                              &intrinsic,
+                 const int                                           max_input_image_H = 1080,
+                 const int                                           max_input_image_W = 1920,
+                 const int                                           crop_window_H     = 160,
+                 const int                                           crop_window_W     = 160,
+                 const float                                         min_depth         = 0.1,
+                 const float                                         max_depth         = 4.0);
 
   bool Register(const cv::Mat     &rgb,
                 const cv::Mat     &depth,
                 const cv::Mat     &mask,
                 const std::string &target_name,
-                Eigen::Matrix4f   &out_pose) override;
+                Eigen::Matrix4f   &out_pose_in_mesh) override;
 
-  bool Track(const cv::Mat     &rgb,
-             const cv::Mat     &depth,
-             const std::string &target_name,
-             Eigen::Matrix4f   &out_pose) override;
-
-  Eigen::Vector3f GetObjectDimension(const std::string &target_name) const override;
+  bool Track(const cv::Mat         &rgb,
+             const cv::Mat         &depth,
+             const Eigen::Matrix4f &hyp_pose_in_mesh,
+             const std::string     &target_name,
+             Eigen::Matrix4f       &out_pose_in_mesh) override;
 
 private:
   bool CheckInputArguments(const cv::Mat     &rgb,
@@ -127,50 +95,21 @@ private:
 
 private:
   // 内部各个模块
-  std::unordered_map<std::string, std::shared_ptr<TexturedMeshLoader>>     map_name2loaders_;
+  std::unordered_map<std::string, std::shared_ptr<BaseMeshLoader>>         map_name2loaders_;
   std::unordered_map<std::string, std::shared_ptr<FoundationPoseRenderer>> map_name2renderer_;
   std::shared_ptr<FoundationPoseSampler>                                   hyp_poses_sampler_;
-  std::shared_ptr<FoundationPoseDecoder>                                   out_pose_decoder_;
-
-  // 维护一个Track用的prev_pose
-  std::unordered_map<std::string, Eigen::Matrix4f> map_name2prev_pose_;
 };
 
-FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore> refiner_core,
-                               std::shared_ptr<inference_core::BaseInferCore> scorer_core,
-                               const std::string                             &target_name,
-                               const std::string                             &mesh_file_path,
-                               const std::string                             &texture_file_path,
-                               const Eigen::Matrix3f                         &intrinsic,
-                               const int                                      input_image_H,
-                               const int                                      input_image_W,
-                               const int                                      crop_window_H,
-                               const int                                      crop_window_W,
-                               const float                                    min_depth,
-                               const float                                    max_depth)
-    : FoundationPose(refiner_core,
-                     scorer_core,
-                     {{target_name, {mesh_file_path, texture_file_path}}},
-                     intrinsic,
-                     input_image_H,
-                     input_image_W,
-                     crop_window_H,
-                     crop_window_W,
-                     min_depth,
-                     max_depth)
-{}
-
-FoundationPose::FoundationPose(
-    std::shared_ptr<inference_core::BaseInferCore>                              refiner_core,
-    std::shared_ptr<inference_core::BaseInferCore>                              scorer_core,
-    const std::unordered_map<std::string, std::pair<std::string, std::string>> &meshes,
-    const Eigen::Matrix3f                                                      &intrinsic,
-    const int                                                                   max_input_image_H,
-    const int                                                                   max_input_image_W,
-    const int                                                                   crop_window_H,
-    const int                                                                   crop_window_W,
-    const float                                                                 min_depth,
-    const float                                                                 max_depth)
+FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore>      refiner_core,
+                               std::shared_ptr<inference_core::BaseInferCore>      scorer_core,
+                               const std::vector<std::shared_ptr<BaseMeshLoader>> &mesh_loaders,
+                               const Eigen::Matrix3f                              &intrinsic,
+                               const int   max_input_image_H,
+                               const int   max_input_image_W,
+                               const int   crop_window_H,
+                               const int   crop_window_W,
+                               const float min_depth,
+                               const float max_depth)
     : refiner_core_(refiner_core),
       scorer_core_(scorer_core),
       intrinsic_(intrinsic),
@@ -209,24 +148,17 @@ FoundationPose::FoundationPose(
   }
 
   // preload modules
-  for (const auto &p_name_paths : meshes)
+  for (const auto &mesh_loader : mesh_loaders)
   {
-    const std::string &target_name      = p_name_paths.first;
-    const std::string &mesh_file_path   = p_name_paths.second.first;
-    const std::string &texutre_img_path = p_name_paths.second.second;
-    LOG(INFO) << "[FoundationPose] Got target_name : " << target_name
-              << ", mesh_file_path: " << mesh_file_path
-              << ", texture_img_path: " << texutre_img_path;
-    auto mesh_loader = std::make_shared<TexturedMeshLoader>(mesh_file_path, texutre_img_path);
-    map_name2loaders_[p_name_paths.first]  = mesh_loader;
-    map_name2renderer_[p_name_paths.first] = std::make_shared<FoundationPoseRenderer>(
+    const std::string &target_name = mesh_loader->GetName();
+    LOG(INFO) << "[FoundationPose] Got target_name : " << target_name;
+    map_name2loaders_[target_name]  = mesh_loader;
+    map_name2renderer_[target_name] = std::make_shared<FoundationPoseRenderer>(
         mesh_loader, intrinsic_, score_mode_poses_num_, refine_mode_crop_ratio);
   }
 
   hyp_poses_sampler_ = std::make_shared<FoundationPoseSampler>(
       max_input_image_H_, max_input_image_W_, min_depth, max_depth, intrinsic_);
-
-  out_pose_decoder_ = std::make_shared<FoundationPoseDecoder>(score_mode_poses_num_);
 }
 
 bool FoundationPose::CheckInputArguments(const cv::Mat     &rgb,
@@ -245,6 +177,9 @@ bool FoundationPose::CheckInputArguments(const cv::Mat     &rgb,
     return false;
   }
 
+  CHECK_STATE(r_rows <= max_input_image_H_ && r_cols <= max_input_image_W_,
+              "[FoundationPose] Got rgb/depth/mask with unexpected size !");
+
   CHECK_STATE(map_name2loaders_.find(target_name) != map_name2loaders_.end(),
               "[FoundationPose] Register Got Invalid `target_name` \
                               which was not provided to FoundationPose instance!!!");
@@ -256,7 +191,7 @@ bool FoundationPose::Register(const cv::Mat     &rgb,
                               const cv::Mat     &depth,
                               const cv::Mat     &mask,
                               const std::string &target_name,
-                              Eigen::Matrix4f   &out_pose)
+                              Eigen::Matrix4f   &out_pose_in_mesh)
 {
   CHECK_STATE(CheckInputArguments(rgb, depth, mask, target_name),
               "[FoundationPose] `Register` Got invalid arguments!!!");
@@ -290,29 +225,25 @@ bool FoundationPose::Register(const cv::Mat     &rgb,
   MESSURE_DURATION_AND_CHECK_STATE(ScorePostProcess(package),
                                    "[FoundationPose] SyncDetect Failed to execute PostProcess!!!");
 
-  out_pose = std::move(package->actual_pose);
+  out_pose_in_mesh = std::move(package->actual_pose);
 
   return true;
 }
 
-bool FoundationPose::Track(const cv::Mat     &rgb,
-                           const cv::Mat     &depth,
-                           const std::string &target_name,
-                           Eigen::Matrix4f   &out_pose)
+bool FoundationPose::Track(const cv::Mat         &rgb,
+                           const cv::Mat         &depth,
+                           const Eigen::Matrix4f &hyp_pose_in_mesh,
+                           const std::string     &target_name,
+                           Eigen::Matrix4f       &out_pose_in_mesh)
 {
   CHECK_STATE(CheckInputArguments(rgb, depth, cv::Mat(), target_name),
               "[FoundationPose] `Track` Got invalid arguments!!!");
-
-  CHECK_STATE(map_name2prev_pose_.find(target_name) != map_name2prev_pose_.end(),
-              "[FoundationPose] Track target: " + target_name +
-                  " is NOT registered yet!!!\
-            Call `Register` first before calling `Track`!!!");
 
   auto package           = std::make_shared<FoundationPosePipelinePackage>();
   package->rgb_on_host   = rgb;
   package->depth_on_host = depth;
   package->target_name   = target_name;
-  package->hyp_poses     = {map_name2prev_pose_[target_name]};
+  package->hyp_poses     = {hyp_pose_in_mesh};
   // 将数据传输至device端，并生成xyz_map数据
   MESSURE_DURATION_AND_CHECK_STATE(UploadDataToDevice(rgb, depth, cv::Mat(), package),
                                    "[FoundationPose] Track Failed to upload data!!!");
@@ -327,22 +258,9 @@ bool FoundationPose::Track(const cv::Mat     &rgb,
   MESSURE_DURATION_AND_CHECK_STATE(TrackPostProcess(package),
                                    "[Foundation] Track Failed to execute `TrackPostProcess`!!!");
 
-  out_pose = std::move(package->actual_pose);
+  out_pose_in_mesh = std::move(package->actual_pose);
 
   return true;
-}
-
-Eigen::Vector3f FoundationPose::GetObjectDimension(const std::string &target_name) const
-{
-  if (map_name2loaders_.find(target_name) == map_name2loaders_.end())
-  {
-    LOG(ERROR) << "[FoundationPose] GetObjectDimension Got invalid `target_name`:" << target_name
-               << ", whose mesh_file mapping was not provided to FoundationPose instance!!!";
-    throw std::runtime_error("[FoundationPose] GetObjectDimension Got invalid `target_name`: " +
-                             target_name);
-  }
-
-  return map_name2loaders_.at(target_name)->GetObjectDimension();
 }
 
 bool FoundationPose::UploadDataToDevice(
@@ -513,19 +431,10 @@ bool FoundationPose::ScorePostProcess(std::shared_ptr<async_pipeline::IPipelineP
 
   const auto &refine_poses = package->refine_poses;
   const int   poses_num    = refine_poses.size();
-  // 输入到decoder进行解码(找到得分最高的位姿，并通过包络盒转换到正确的位姿)
-  // 获取对应的mesh_loader
-  const auto &mesh_loader = map_name2loaders_[package->target_name];
 
   // 获取置信度最大的refined_pose
-  int max_score_index = out_pose_decoder_->GetMaxScoreIndex(score_ptr);
-  // 记录
-  map_name2prev_pose_[package->target_name] = refine_poses[max_score_index];
-
-  // 转换到包络盒坐标系
-  Eigen::Matrix4f actual_pose;
-  out_pose_decoder_->DecodeWithMaxScore(max_score_index, refine_poses, actual_pose, mesh_loader);
-  package->actual_pose = actual_pose;
+  int max_score_index  = getMaxScoreIndex(nullptr, reinterpret_cast<float *>(score_ptr), poses_num);
+  package->actual_pose = refine_poses[max_score_index];
 
   return true;
 }
@@ -577,73 +486,21 @@ bool FoundationPose::TrackPostProcess(std::shared_ptr<async_pipeline::IPipelineP
     refine_poses[i].block<3, 3>(0, 0) = result_3x3;
   }
 
-  // 记录
-  map_name2prev_pose_[package->target_name] = refine_poses[0];
-
-  // 获取对应的mesh_loader
-  out_pose_decoder_->DecodeInRefine(refine_poses[0], package->actual_pose, mesh_loader);
+  package->actual_pose = refine_poses[0];
 
   return true;
 }
 
 std::shared_ptr<Base6DofDetectionModel> CreateFoundationPoseModel(
-    std::shared_ptr<inference_core::BaseInferCore> refiner_core,
-    std::shared_ptr<inference_core::BaseInferCore> scorer_core,
-    const std::string                             &target_name,
-    const std::string                             &mesh_file_path,
-    const std::string                             &texture_file_path,
-    const std::vector<float>                      &intrinsic_in_vec)
+    std::shared_ptr<inference_core::BaseInferCore>      refiner_core,
+    std::shared_ptr<inference_core::BaseInferCore>      scorer_core,
+    const std::vector<std::shared_ptr<BaseMeshLoader>> &mesh_loaders,
+    const Eigen::Matrix3f                              &intrinsic_in_mat,
+    const int                                           max_input_image_height,
+    const int                                           max_input_image_width)
 {
-  // 重构内参矩阵，`row_major` -> `col_major`
-  Eigen::Matrix3f intrinsic;
-  for (int r = 0; r < 3; ++r)
-  {
-    for (int c = 0; c < 3; ++c)
-    {
-      intrinsic(r, c) = intrinsic_in_vec[r * 3 + c];
-    }
-  }
-  return std::make_shared<FoundationPose>(refiner_core, scorer_core, target_name, mesh_file_path,
-                                          texture_file_path, intrinsic);
-}
-
-std::shared_ptr<Base6DofDetectionModel> CreateFoundationPoseModel(
-    std::shared_ptr<inference_core::BaseInferCore> refiner_core,
-    std::shared_ptr<inference_core::BaseInferCore> scorer_core,
-    const std::string                             &target_name,
-    const std::string                             &mesh_file_path,
-    const std::string                             &texture_file_path,
-    const Eigen::Matrix3f                         &intrinsic_in_mat)
-{
-  return std::make_shared<FoundationPose>(refiner_core, scorer_core, target_name, mesh_file_path,
-                                          texture_file_path, intrinsic_in_mat);
-}
-
-std::shared_ptr<Base6DofDetectionModel> CreateFoundationPoseModel(
-    std::shared_ptr<inference_core::BaseInferCore>                              refiner_core,
-    std::shared_ptr<inference_core::BaseInferCore>                              scorer_core,
-    const std::unordered_map<std::string, std::pair<std::string, std::string>> &meshes,
-    const std::vector<float>                                                   &intrinsic_in_vec)
-{
-  // 重构内参矩阵，`row_major` -> `col_major`
-  Eigen::Matrix3f intrinsic;
-  for (int r = 0; r < 3; ++r)
-  {
-    for (int c = 0; c < 3; ++c)
-    {
-      intrinsic(r, c) = intrinsic_in_vec[r * 3 + c];
-    }
-  }
-  return std::make_shared<FoundationPose>(refiner_core, scorer_core, meshes, intrinsic);
-}
-
-std::shared_ptr<Base6DofDetectionModel> CreateFoundationPoseModel(
-    std::shared_ptr<inference_core::BaseInferCore>                              refiner_core,
-    std::shared_ptr<inference_core::BaseInferCore>                              scorer_core,
-    const std::unordered_map<std::string, std::pair<std::string, std::string>> &meshes,
-    const Eigen::Matrix3f                                                      &intrinsic_in_mat)
-{
-  return std::make_shared<FoundationPose>(refiner_core, scorer_core, meshes, intrinsic_in_mat);
+  return std::make_shared<FoundationPose>(refiner_core, scorer_core, mesh_loaders, intrinsic_in_mat,
+                                          max_input_image_height, max_input_image_width);
 }
 
 } // namespace detection_6d

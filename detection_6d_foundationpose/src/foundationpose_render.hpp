@@ -10,6 +10,7 @@
 
 #include "nvdiffrast/common/cudaraster/CudaRaster.hpp"
 #include "foundationpose_utils.hpp"
+#include "detection_6d_foundationpose/mesh_loader.hpp"
 
 namespace detection_6d {
 
@@ -17,14 +18,14 @@ typedef Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> Ro
 
 class FoundationPoseRenderer {
 public:
-  FoundationPoseRenderer(std::shared_ptr<TexturedMeshLoader> mesh_loader,
-                         const Eigen::Matrix3f              &intrinsic,
-                         const int                           input_poses_num,
-                         const float                         crop_ratio    = 1.2,
-                         const int                           crop_window_H = 160,
-                         const int                           crop_window_W = 160,
-                         const float                         min_depth     = 0.1,
-                         const float                         max_depth     = 4.0);
+  FoundationPoseRenderer(std::shared_ptr<BaseMeshLoader> mesh_loader,
+                         const Eigen::Matrix3f          &intrinsic,
+                         const int                       input_poses_num,
+                         const float                     crop_ratio    = 1.2,
+                         const int                       crop_window_H = 160,
+                         const int                       crop_window_W = 160,
+                         const float                     min_depth     = 0.1,
+                         const float                     max_depth     = 4.0);
 
   bool RenderAndTransform(const std::vector<Eigen::Matrix4f> &_poses,
                           void                               *rgb_on_device,
@@ -101,7 +102,7 @@ private:
   const float max_depth_;
 
   // mesh
-  std::shared_ptr<TexturedMeshLoader>                                   mesh_loader_;
+  std::shared_ptr<BaseMeshLoader>                                       mesh_loader_;
   std::vector<float>                                                    vertices_;
   std::vector<float>                                                    texcoords_;
   std::vector<int32_t>                                                  mesh_faces_;
