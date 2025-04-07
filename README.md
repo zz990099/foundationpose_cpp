@@ -7,6 +7,7 @@
 
 ## Update LOG
 
+- [2025.04] 解耦`Register`和`Track`过程; 令算法输出mesh下的位姿，提供mesh_loader相关的接口和方法供外部拓展。
 - [2025.03] 渲染过程与原Python工程对齐，支持无texture纹理输入渲染. [对应PR](https://github.com/zz990099/foundationpose_cpp/pull/13).
 - [2025.03] 添加对Jetson Orin平台支持，[一键配置docker环境](docs/build_enviroment_on_jetson.md)
 
