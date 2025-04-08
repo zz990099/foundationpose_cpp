@@ -39,11 +39,10 @@ set(source_file src/nvdiffrast/common/cudaraster/impl/Buffer.cpp
                 src/foundationpose_render.cu
                 src/foundationpose_sampling.cpp
                 src/foundationpose_sampling.cu
-                src/foundationpose_utils.cpp
                 src/foundationpose_utils.cu
-                src/foundationpose_decoder.cpp
                 src/foundationpose_decoder.cu
                 src/foundationpose.cpp
+                src/mesh_loader/assimp_mesh_loader.cpp
 )
 
 include_directories(

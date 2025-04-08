@@ -217,14 +217,14 @@ void WrapFloatPtrToNHWCTensor(
   output_tensor = nvcv::TensorWrapData(output_data);
 }
 
-FoundationPoseRenderer::FoundationPoseRenderer(std::shared_ptr<TexturedMeshLoader> mesh_loader,
-                                               const Eigen::Matrix3f              &intrinsic,
-                                               const int                           input_poses_num,
-                                               const float                         crop_ratio,
-                                               const int                           crop_window_H,
-                                               const int                           crop_window_W,
-                                               const float                         min_depth,
-                                               const float                         max_depth)
+FoundationPoseRenderer::FoundationPoseRenderer(std::shared_ptr<BaseMeshLoader> mesh_loader,
+                                               const Eigen::Matrix3f          &intrinsic,
+                                               const int                       input_poses_num,
+                                               const float                     crop_ratio,
+                                               const int                       crop_window_H,
+                                               const int                       crop_window_W,
+                                               const float                     min_depth,
+                                               const float                     max_depth)
     : mesh_loader_(mesh_loader),
       intrinsic_(intrinsic),
       input_poses_num_(input_poses_num),
@@ -386,7 +386,7 @@ bool FoundationPoseRenderer::LoadTexturedMesh()
   const auto &mesh_vertices       = mesh_loader_->GetMeshVertices();
   const auto &mesh_vertex_normals = mesh_loader_->GetMeshVertexNormals();
   const auto &mesh_texcoords      = mesh_loader_->GetMeshTextureCoords();
-  const auto &mesh_faces          = mesh_loader_->GetMeshFaces();
+  const auto &mesh_faces          = mesh_loader_->GetMeshTriangleFaces();
   const auto &rgb_texture_map     = mesh_loader_->GetTextureMap();
   mesh_diameter_                  = mesh_loader_->GetMeshDiameter();
 
@@ -395,34 +395,25 @@ bool FoundationPoseRenderer::LoadTexturedMesh()
   // Walk through each of the mesh's vertices
   for (unsigned int v = 0; v < mesh_vertices.size(); v++)
   {
-    vertices_.push_back(mesh_vertices[v].x - mesh_model_center[0]);
-    vertices_.push_back(mesh_vertices[v].y - mesh_model_center[1]);
-    vertices_.push_back(mesh_vertices[v].z - mesh_model_center[2]);
+    vertices_.push_back(mesh_vertices[v][0] - mesh_model_center[0]);
+    vertices_.push_back(mesh_vertices[v][1] - mesh_model_center[1]);
+    vertices_.push_back(mesh_vertices[v][2] - mesh_model_center[2]);
 
-    vertex_normals.push_back(mesh_vertex_normals[v].x);
-    vertex_normals.push_back(mesh_vertex_normals[v].y);
-    vertex_normals.push_back(mesh_vertex_normals[v].z);
+    vertex_normals.push_back(mesh_vertex_normals[v][0]);
+    vertex_normals.push_back(mesh_vertex_normals[v][1]);
+    vertex_normals.push_back(mesh_vertex_normals[v][2]);
 
     // Check if the mesh has texture coordinates
-    if (mesh_texcoords.size() >= 1)
-    {
-      texcoords_.push_back(mesh_texcoords[0][v].x);
-      texcoords_.push_back(1 - mesh_texcoords[0][v].y);
-    }
+    texcoords_.push_back(mesh_texcoords[v][0]);
+    texcoords_.push_back(1 - mesh_texcoords[v][1]);
   }
 
   // Walk through each of the mesh's faces (a face is a mesh its triangle)
   for (unsigned int f = 0; f < mesh_faces.size(); f++)
   {
-    const aiFace &face = mesh_faces[f];
-
-    // We assume the face is a triangle due to aiProcess_Triangulate
-    CHECK_STATE(face.mNumIndices == 3, "Only triangle is supported, but the object face has " +
-                                           std::to_string(face.mNumIndices) + " vertices. ");
-
-    for (unsigned int i = 0; i < face.mNumIndices; i++)
+    for (unsigned int i = 0; i < kTriangleVertices; i++)
     {
-      mesh_faces_.push_back(face.mIndices[i]);
+      mesh_faces_.push_back(mesh_faces[f][i]);
     }
   }
 

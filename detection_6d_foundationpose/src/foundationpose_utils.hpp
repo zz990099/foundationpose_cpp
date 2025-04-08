@@ -34,100 +34,6 @@
 
 namespace detection_6d {
 
-class TexturedMeshLoader {
-public:
-  /**
-   * @brief 创建TexturedMeshLoader实例，并加载mesh模型以及其外观图
-   *
-   * @param mesh_file_path 应当以`.obj`结尾
-   * @param textured_file_path 应当以`.png`结尾
-   *
-   * @throw 如果输入路径格式不正确，抛出`std::invalid_arguments`异常
-   */
-  TexturedMeshLoader(const std::string &mesh_file_path, const std::string &textured_file_path);
-
-  /**
-   * @brief 获取mesh模型的半径
-   *
-   * @return float
-   */
-  float GetMeshDiameter() const noexcept;
-
-  /**
-   * @brief 获取mesh模型的顶点数量
-   *
-   * @return size_t
-   */
-  size_t GetMeshNumVertices() const noexcept;
-
-  /**
-   * @brief 获取mesh模型的顶点数据指针
-   *
-   * @return const std::vector<aiVector3D> &
-   */
-  const std::vector<aiVector3D> &GetMeshVertices() const noexcept;
-
-  /**
-   * @brief 获取mesh模型顶点的法向量
-   *
-   * @return const std::vector<aiVector3D> &
-   */
-  const std::vector<aiVector3D> &GetMeshVertexNormals() const noexcept;
-
-  /**
-   * @brief 获取mesh模型的外观坐标系
-   *
-   * @return const std::vector<aiVector3D> &
-   */
-  const std::vector<std::vector<aiVector3D>> &GetMeshTextureCoords() const noexcept;
-
-  /**
-   * @brief 获取mesh模型的faces
-   *
-   * @return const std::vector<aiFace> &
-   */
-  const std::vector<aiFace> &GetMeshFaces() const noexcept;
-
-  /**
-   * @brief 获取mesh模型的三维中心
-   *
-   * @return const std::vector<Eigen::Vector3f>&
-   */
-  const Eigen::Vector3f &GetMeshModelCenter() const noexcept;
-
-  /**
-   * @brief 获取mesh包围盒转换矩阵
-   *
-   * @return const Eigen::Matrix4f&
-   */
-  const Eigen::Matrix4f &GetOrientBounds() const noexcept;
-
-  /**
-   * @brief 获取cv::Mat格式的外观图
-   *
-   * @return const cv::Mat&
-   */
-  const cv::Mat &GetTextureMap() const noexcept;
-
-  /**
-   * @brief 获取物体最小包络盒的尺寸
-   *
-   * @return const Eigen::Vector3f
-   */
-  const Eigen::Vector3f GetObjectDimension() const noexcept;
-
-private:
-  float                                mesh_diamter_;
-  Eigen::Vector3f                      mesh_center_;
-  std::vector<aiVector3D>              vertices_;
-  std::vector<aiVector3D>              vertex_normals_;
-  std::vector<std::vector<aiVector3D>> texcoords_;
-  std::vector<aiFace>                  faces_;
-  Eigen::Matrix4f                      obb_;
-  Eigen::Vector3f                      dim_;
-  cv::Mat                              texture_map_;
-};
-
 struct FoundationPosePipelinePackage : public async_pipeline::IPipelinePackage {
   // 输入host端rgb图像
   cv::Mat rgb_on_host;
@@ -199,10 +105,6 @@ struct FoundationPosePipelinePackage : public async_pipeline::IPipelinePackage {
     }                                  \
   }
 
-// static auto func_cuda_memory_release = [](float* p) {
-//   CHECK_CUDA(cudaFree(p), "Release cuda memory ptr FAILED!!!");
-// };
-
 template <typename T>
 class CudaMemoryDeleter {
 public:
@@ -215,12 +117,6 @@ public:
     }
   }
 };
-
-// Finds the minimum and maximum vertex from the mesh loaded by assimp
-std::pair<Eigen::Vector3f, Eigen::Vector3f> FindMinMaxVertex(const aiMesh *mesh);
-
-// Calculates the diameter of the mesh loaded by assimp
-float CalcMeshDiameter(const aiMesh *mesh);
 
 } // namespace detection_6d
 
