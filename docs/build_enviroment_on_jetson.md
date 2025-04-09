@@ -12,7 +12,8 @@
 
 确保`Jetpack6.0`已经刷机成功，docker能够正常运行，直接运行项目内的构建脚本，即可生成项目运行环境。
 ```bash
-cd ${foundationpose_cpp}/docker/
-bash build_docker.sh --container_type=jetson_trt8
-bash into_docker.sh
+cd ${foundationpose_cpp}
+bash easy_deploy_tool/docker/easy_deploy_startup.sh
+# Select `jetson` -> `trt10_u2204`/`trt8_u2204` (`trt8_u2004` not supported)
+bash easy_deploy_tool/docker/into_docker.sh
 ```
