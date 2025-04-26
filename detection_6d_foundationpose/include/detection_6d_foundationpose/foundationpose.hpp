@@ -29,6 +29,7 @@ public:
    * @param mask Object mask (CV_8UC1 format, positive pixels > 0)
    * @param target_name Object category name (must match construction mapping)
    * @param out_pose_in_mesh Output pose in mesh coordinate frame
+   * @param refine_itr Refinement process iteration num
    * @return true Registration successful
    * @return false Registration failed
    */
@@ -36,7 +37,8 @@ public:
                         const cv::Mat     &depth,
                         const cv::Mat     &mask,
                         const std::string &target_name,
-                        Eigen::Matrix4f   &out_pose_in_mesh) = 0;
+                        Eigen::Matrix4f   &out_pose_in_mesh,
+                        size_t             refine_itr = 1) = 0;
 
   /**
    * @brief Track object pose from subsequent frames (lightweight version of Register)
@@ -50,6 +52,7 @@ public:
    * @param hyp_pose_in_mesh Hypothesis pose in mesh frame (from Register or other sources)
    * @param target_name Object category name (must match construction mapping)
    * @param out_pose_in_mesh Output pose in mesh coordinate frame
+   * @param refine_itr Refinement process iteration num
    * @return true Tracking successful
    * @return false Tracking failed
    */
@@ -57,7 +60,8 @@ public:
                      const cv::Mat         &depth,
                      const Eigen::Matrix4f &hyp_pose_in_mesh,
                      const std::string     &target_name,
-                     Eigen::Matrix4f       &out_pose_in_mesh) = 0;
+                     Eigen::Matrix4f       &out_pose_in_mesh,
+                     size_t                 refine_itr = 1) = 0;
 
   /**
    * @brief Virtual destructor for proper resource cleanup

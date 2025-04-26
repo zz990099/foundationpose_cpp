@@ -17,6 +17,7 @@ static const std::string demo_textured_obj_path = demo_data_path_ + "/mesh/textu
 static const std::string demo_textured_map_path = demo_data_path_ + "/mesh/texture_map.png";
 static const std::string demo_name_             = "mustard";
 static const std::string frame_id               = "1581120424100262102";
+static const size_t      refine_itr             = 1;
 
 std::tuple<std::shared_ptr<Base6DofDetectionModel>, std::shared_ptr<BaseMeshLoader>> CreateModel()
 {
@@ -58,7 +59,7 @@ TEST(foundationpose_test, test)
   const Eigen::Vector3f object_dimension = mesh_loader->GetObjectDimension();
 
   Eigen::Matrix4f out_pose;
-  CHECK(foundation_pose->Register(rgb.clone(), depth, mask, demo_name_, out_pose));
+  CHECK(foundation_pose->Register(rgb.clone(), depth, mask, demo_name_, out_pose, refine_itr));
   LOG(WARNING) << "first Pose : " << out_pose;
 
   // [temp] for test
