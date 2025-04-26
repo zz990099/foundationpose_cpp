@@ -33,7 +33,7 @@ public:
                  const int                                           max_input_image_W = 1920,
                  const int                                           crop_window_H     = 160,
                  const int                                           crop_window_W     = 160,
-                 const float                                         min_depth         = 0.1);
+                 const float                                         min_depth         = 0.001);
 
   bool Register(const cv::Mat     &rgb,
                 const cv::Mat     &depth,
@@ -295,7 +295,7 @@ bool FoundationPose::UploadDataToDevice(
   convert_depth_to_xyz_map(static_cast<float *>(depth_on_device), input_image_height,
                            input_image_width, static_cast<float *>(xyz_map_on_device),
                            intrinsic_(0, 0), intrinsic_(1, 1), intrinsic_(0, 2), intrinsic_(1, 2),
-                           0.1);
+                           0.001);
 
   // 输出device端指针，并注册析构过程
   auto func_release_cuda_buffer = [](void *ptr) {

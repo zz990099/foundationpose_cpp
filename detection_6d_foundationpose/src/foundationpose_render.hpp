@@ -23,7 +23,7 @@ public:
                          const int                       input_poses_num,
                          const int                       crop_window_H = 160,
                          const int                       crop_window_W = 160,
-                         const float                     min_depth     = 0.1,
+                         const float                     min_depth     = 0.001,
                          const float                     max_depth     = 4.0);
 
   bool RenderAndTransform(const std::vector<Eigen::Matrix4f> &_poses,
