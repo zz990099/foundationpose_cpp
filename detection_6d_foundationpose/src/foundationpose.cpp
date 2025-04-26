@@ -33,8 +33,7 @@ public:
                  const int                                           max_input_image_W = 1920,
                  const int                                           crop_window_H     = 160,
                  const int                                           crop_window_W     = 160,
-                 const float                                         min_depth         = 0.1,
-                 const float                                         max_depth         = 4.0);
+                 const float                                         min_depth         = 0.1);
 
   bool Register(const cv::Mat     &rgb,
                 const cv::Mat     &depth,
@@ -79,8 +78,8 @@ private:
   // render参数
   const int   score_mode_poses_num_  = 252;
   const int   refine_mode_poses_num_ = 1;
-  const float refine_mode_crop_ratio = 1.2;
-  const float score_mode_crop_ratio  = 1.1;
+  const float refine_mode_crop_ratio_ = 1.2;
+  const float score_mode_crop_ratio_  = 1.1;
 
 private:
   // 以下参数对外开放，通过构造函数传入
@@ -108,8 +107,7 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore>   
                                const int   max_input_image_W,
                                const int   crop_window_H,
                                const int   crop_window_W,
-                               const float min_depth,
-                               const float max_depth)
+                               const float min_depth)
     : refiner_core_(refiner_core),
       scorer_core_(scorer_core),
       intrinsic_(intrinsic),
@@ -154,11 +152,11 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore>   
     LOG(INFO) << "[FoundationPose] Got target_name : " << target_name;
     map_name2loaders_[target_name]  = mesh_loader;
     map_name2renderer_[target_name] = std::make_shared<FoundationPoseRenderer>(
-        mesh_loader, intrinsic_, score_mode_poses_num_, refine_mode_crop_ratio);
+        mesh_loader, intrinsic_, score_mode_poses_num_);
   }
 
   hyp_poses_sampler_ = std::make_shared<FoundationPoseSampler>(
-      max_input_image_H_, max_input_image_W_, min_depth, max_depth, intrinsic_);
+      max_input_image_H_, max_input_image_W_, min_depth, intrinsic_);
 }
 
 bool FoundationPose::CheckInputArguments(const cv::Mat     &rgb,
@@ -339,7 +337,8 @@ bool FoundationPose::RefinePreProcess(std::shared_ptr<async_pipeline::IPipelineP
           package->hyp_poses, package->rgb_on_device.get(), package->depth_on_device.get(),
           package->xyz_map_on_device.get(), package->input_image_height, package->input_image_width,
           refiner_blob_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first,
-          refiner_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first),
+          refiner_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first,
+          refine_mode_crop_ratio_),
       "[FoundationPose] Failed to render and transform !!!");
   // 3. 设置推理时形状
   const int input_poses_num = package->hyp_poses.size();
@@ -411,7 +410,8 @@ bool FoundationPose::ScorePreprocess(std::shared_ptr<async_pipeline::IPipelinePa
           refine_poses, package->rgb_on_device.get(), package->depth_on_device.get(),
           package->xyz_map_on_device.get(), package->input_image_height, package->input_image_width,
           scorer_blob_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first,
-          scorer_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first),
+          scorer_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first,
+          score_mode_crop_ratio_),
       "[FoundationPose] score_renderer RenderAndTransform Failed!!!");
 
   package->refine_poses        = std::move(refine_poses);

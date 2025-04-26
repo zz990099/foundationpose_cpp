@@ -21,7 +21,6 @@ public:
   FoundationPoseRenderer(std::shared_ptr<BaseMeshLoader> mesh_loader,
                          const Eigen::Matrix3f          &intrinsic,
                          const int                       input_poses_num,
-                         const float                     crop_ratio    = 1.2,
                          const int                       crop_window_H = 160,
                          const int                       crop_window_W = 160,
                          const float                     min_depth     = 0.1,
@@ -34,7 +33,8 @@ public:
                           int                                 input_image_height,
                           int                                 input_image_width,
                           void                               *render_buffer,
-                          void                               *transf_buffer);
+                          void                               *transf_buffer,
+                          float                               crop_ratio);
 
   ~FoundationPoseRenderer();
 
@@ -94,7 +94,6 @@ private:
   // crop window size (model input size)
   const int             crop_window_H_;
   const int             crop_window_W_;
-  const float           crop_ratio_; // refine,    score->1.1
   const Eigen::Matrix3f intrinsic_;
 
   // depth threshold

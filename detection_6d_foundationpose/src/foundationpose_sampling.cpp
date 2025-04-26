@@ -300,7 +300,6 @@ bool GuessTranslation(const Eigen::MatrixXf  &depth,
 FoundationPoseSampler::FoundationPoseSampler(const int              max_input_image_H,
                                              const int              max_input_image_W,
                                              const float            min_depth,
-                                             const float            max_depth,
                                              const Eigen::Matrix3f &intrinsic)
     : max_input_image_H_(max_input_image_H),
       max_input_image_W_(max_input_image_W),
