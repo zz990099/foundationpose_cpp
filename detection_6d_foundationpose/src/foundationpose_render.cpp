@@ -220,7 +220,6 @@ void WrapFloatPtrToNHWCTensor(
 FoundationPoseRenderer::FoundationPoseRenderer(std::shared_ptr<BaseMeshLoader> mesh_loader,
                                                const Eigen::Matrix3f          &intrinsic,
                                                const int                       input_poses_num,
-                                               const float                     crop_ratio,
                                                const int                       crop_window_H,
                                                const int                       crop_window_W,
                                                const float                     min_depth,
@@ -228,7 +227,6 @@ FoundationPoseRenderer::FoundationPoseRenderer(std::shared_ptr<BaseMeshLoader> m
     : mesh_loader_(mesh_loader),
       intrinsic_(intrinsic),
       input_poses_num_(input_poses_num),
-      crop_ratio_(crop_ratio),
       crop_window_H_(crop_window_H),
       crop_window_W_(crop_window_W),
       min_depth_(min_depth),
@@ -820,14 +818,15 @@ bool FoundationPoseRenderer::RenderAndTransform(const std::vector<Eigen::Matrix4
                                                 int   input_image_height,
                                                 int   input_image_width,
                                                 void *render_buffer,
-                                                void *transf_buffer)
+                                                void *transf_buffer,
+                                                float crop_ratio)
 {
   const int input_poses_num = _poses.size();
 
   // 1. 根据目标位姿计算变换矩阵
   std::vector<Eigen::MatrixXf> poses(_poses.begin(), _poses.end());
   Eigen::Vector2i              out_size = {crop_window_H_, crop_window_W_};
-  auto tfs = ComputeCropWindowTF(poses, intrinsic_, out_size, crop_ratio_, mesh_diameter_);
+  auto tfs = ComputeCropWindowTF(poses, intrinsic_, out_size, crop_ratio, mesh_diameter_);
   CHECK_STATE(tfs.size() != 0, "[FoundationposeRender] The transform matrix vector is empty");
 
   // 2. 将输入的poses拷贝到device端

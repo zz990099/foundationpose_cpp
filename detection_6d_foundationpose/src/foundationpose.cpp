@@ -33,20 +33,21 @@ public:
                  const int                                           max_input_image_W = 1920,
                  const int                                           crop_window_H     = 160,
                  const int                                           crop_window_W     = 160,
-                 const float                                         min_depth         = 0.1,
-                 const float                                         max_depth         = 4.0);
+                 const float                                         min_depth         = 0.001);
 
   bool Register(const cv::Mat     &rgb,
                 const cv::Mat     &depth,
                 const cv::Mat     &mask,
                 const std::string &target_name,
-                Eigen::Matrix4f   &out_pose_in_mesh) override;
+                Eigen::Matrix4f   &out_pose_in_mesh,
+                size_t             refine_itr = 1) override;
 
   bool Track(const cv::Mat         &rgb,
              const cv::Mat         &depth,
              const Eigen::Matrix4f &hyp_pose_in_mesh,
              const std::string     &target_name,
-             Eigen::Matrix4f       &out_pose_in_mesh) override;
+             Eigen::Matrix4f       &out_pose_in_mesh,
+             size_t                 refine_itr = 1) override;
 
 private:
   bool CheckInputArguments(const cv::Mat     &rgb,
@@ -54,18 +55,22 @@ private:
                            const cv::Mat     &mask,
                            const std::string &target_name);
 
-  bool UploadDataToDevice(const cv::Mat                                        &rgb,
-                          const cv::Mat                                        &depth,
-                          const cv::Mat                                        &mask,
-                          const std::shared_ptr<FoundationPosePipelinePackage> &package);
+  using ParsingType = std::unique_ptr<FoundationPosePipelinePackage>;
 
-  bool RefinePreProcess(std::shared_ptr<async_pipeline::IPipelinePackage> package);
+  bool UploadDataToDevice(const cv::Mat     &rgb,
+                          const cv::Mat     &depth,
+                          const cv::Mat     &mask,
+                          const ParsingType &package);
 
-  bool ScorePreprocess(std::shared_ptr<async_pipeline::IPipelinePackage> package);
+  bool RefinePreProcess(const ParsingType &package);
 
-  bool ScorePostProcess(std::shared_ptr<async_pipeline::IPipelinePackage> package);
+  bool RefinePostProcess(const ParsingType &package);
 
-  bool TrackPostProcess(std::shared_ptr<async_pipeline::IPipelinePackage> package);
+  bool ScorePreprocess(const ParsingType &package);
+
+  bool ScorePostProcess(const ParsingType &package);
+
+  bool TrackPostProcess(const ParsingType &package);
 
 private:
   // 以下参数不对外开放
@@ -77,10 +82,10 @@ private:
   const float       REFINE_ROT_NORMALIZER      = 0.349065850398865;
   const std::string SCORE_OUTPUT_BLOB_NAME     = "scores";
   // render参数
-  const int   score_mode_poses_num_  = 252;
-  const int   refine_mode_poses_num_ = 1;
-  const float refine_mode_crop_ratio = 1.2;
-  const float score_mode_crop_ratio  = 1.1;
+  const int   score_mode_poses_num_   = 252;
+  const int   refine_mode_poses_num_  = 1;
+  const float refine_mode_crop_ratio_ = 1.2;
+  const float score_mode_crop_ratio_  = 1.1;
 
 private:
   // 以下参数对外开放，通过构造函数传入
@@ -108,8 +113,7 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore>   
                                const int   max_input_image_W,
                                const int   crop_window_H,
                                const int   crop_window_W,
-                               const float min_depth,
-                               const float max_depth)
+                               const float min_depth)
     : refiner_core_(refiner_core),
       scorer_core_(scorer_core),
       intrinsic_(intrinsic),
@@ -152,13 +156,13 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore>   
   {
     const std::string &target_name = mesh_loader->GetName();
     LOG(INFO) << "[FoundationPose] Got target_name : " << target_name;
-    map_name2loaders_[target_name]  = mesh_loader;
-    map_name2renderer_[target_name] = std::make_shared<FoundationPoseRenderer>(
-        mesh_loader, intrinsic_, score_mode_poses_num_, refine_mode_crop_ratio);
+    map_name2loaders_[target_name] = mesh_loader;
+    map_name2renderer_[target_name] =
+        std::make_shared<FoundationPoseRenderer>(mesh_loader, intrinsic_, score_mode_poses_num_);
   }
 
   hyp_poses_sampler_ = std::make_shared<FoundationPoseSampler>(
-      max_input_image_H_, max_input_image_W_, min_depth, max_depth, intrinsic_);
+      max_input_image_H_, max_input_image_W_, min_depth, intrinsic_);
 }
 
 bool FoundationPose::CheckInputArguments(const cv::Mat     &rgb,
@@ -191,12 +195,13 @@ bool FoundationPose::Register(const cv::Mat     &rgb,
                               const cv::Mat     &depth,
                               const cv::Mat     &mask,
                               const std::string &target_name,
-                              Eigen::Matrix4f   &out_pose_in_mesh)
+                              Eigen::Matrix4f   &out_pose_in_mesh,
+                              size_t             refine_itr)
 {
   CHECK_STATE(CheckInputArguments(rgb, depth, mask, target_name),
               "[FoundationPose] `Register` Got invalid arguments!!!");
 
-  auto package           = std::make_shared<FoundationPosePipelinePackage>();
+  auto package           = std::make_unique<FoundationPosePipelinePackage>();
   package->rgb_on_host   = rgb;
   package->depth_on_host = depth;
   package->mask_on_host  = mask;
@@ -205,19 +210,23 @@ bool FoundationPose::Register(const cv::Mat     &rgb,
   MESSURE_DURATION_AND_CHECK_STATE(UploadDataToDevice(rgb, depth, mask, package),
                                    "[FoundationPose] SyncDetect Failed to upload data!!!");
 
-  MESSURE_DURATION_AND_CHECK_STATE(
-      RefinePreProcess(package),
-      "[FoundationPose] SyncDetect Failed to execute RefinePreProcess!!!");
+  for (size_t i = 0 ; i < refine_itr ; ++ i) {
+    MESSURE_DURATION_AND_CHECK_STATE(
+        RefinePreProcess(package),
+        "[FoundationPose] SyncDetect Failed to execute RefinePreProcess!!!");
 
-  // package->infer_buffer = package->refiner_blobs_buffer;
-  MESSURE_DURATION_AND_CHECK_STATE(
-      refiner_core_->SyncInfer(package->GetInferBuffer()),
-      "[FoundationPose] SyncDetect Failed to execute refiner_core_->SyncInfer!!!");
+    MESSURE_DURATION_AND_CHECK_STATE(
+        refiner_core_->SyncInfer(package->GetInferBuffer()),
+        "[FoundationPose] SyncDetect Failed to execute refiner_core_->SyncInfer!!!");
+
+    MESSURE_DURATION_AND_CHECK_STATE(
+        RefinePostProcess(package),
+        "[FoundationPose] SyncDetect Failed to execute RefinePostProcess!!!");
+  }
 
   MESSURE_DURATION_AND_CHECK_STATE(
       ScorePreprocess(package), "[FoundationPose] SyncDetect Failed to execute ScorePreprocess!!!");
 
-  // unit_buffer->p_blob_buffers = package->scorer_blobs_buffer;
   MESSURE_DURATION_AND_CHECK_STATE(
       scorer_core_->SyncInfer(package->GetInferBuffer()),
       "[FoundationPose] SyncDetect Failed to execute scorer_core_->SyncInfer!!!");
@@ -234,12 +243,13 @@ bool FoundationPose::Track(const cv::Mat         &rgb,
                            const cv::Mat         &depth,
                            const Eigen::Matrix4f &hyp_pose_in_mesh,
                            const std::string     &target_name,
-                           Eigen::Matrix4f       &out_pose_in_mesh)
+                           Eigen::Matrix4f       &out_pose_in_mesh,
+                           size_t                 refine_itr)
 {
   CHECK_STATE(CheckInputArguments(rgb, depth, cv::Mat(), target_name),
               "[FoundationPose] `Track` Got invalid arguments!!!");
 
-  auto package           = std::make_shared<FoundationPosePipelinePackage>();
+  auto package           = std::make_unique<FoundationPosePipelinePackage>();
   package->rgb_on_host   = rgb;
   package->depth_on_host = depth;
   package->target_name   = target_name;
@@ -248,26 +258,27 @@ bool FoundationPose::Track(const cv::Mat         &rgb,
   MESSURE_DURATION_AND_CHECK_STATE(UploadDataToDevice(rgb, depth, cv::Mat(), package),
                                    "[FoundationPose] Track Failed to upload data!!!");
 
-  MESSURE_DURATION_AND_CHECK_STATE(RefinePreProcess(package),
-                                   "[FoundationPose] Track Failed to execute RefinePreProcess!!!");
+  for (size_t i = 0 ; i < refine_itr ; ++ i) {
+    MESSURE_DURATION_AND_CHECK_STATE(RefinePreProcess(package),
+                                     "[FoundationPose] Track Failed to execute RefinePreProcess!!!");
 
-  MESSURE_DURATION_AND_CHECK_STATE(
-      refiner_core_->SyncInfer(package->GetInferBuffer()),
-      "[FoundationPose] Track Failed to execute refiner_core_->SyncInfer!!!");
+    MESSURE_DURATION_AND_CHECK_STATE(
+        refiner_core_->SyncInfer(package->GetInferBuffer()),
+        "[FoundationPose] Track Failed to execute refiner_core_->SyncInfer!!!");
 
-  MESSURE_DURATION_AND_CHECK_STATE(TrackPostProcess(package),
-                                   "[Foundation] Track Failed to execute `TrackPostProcess`!!!");
+    MESSURE_DURATION_AND_CHECK_STATE(RefinePostProcess(package),
+                                     "[Foundation] Track Failed to execute `RefinePostProcess`!!!");
+  }
 
-  out_pose_in_mesh = std::move(package->actual_pose);
+  out_pose_in_mesh = std::move(package->hyp_poses[0]);
 
   return true;
 }
 
-bool FoundationPose::UploadDataToDevice(
-    const cv::Mat                                        &rgb,
-    const cv::Mat                                        &depth,
-    const cv::Mat                                        &mask,
-    const std::shared_ptr<FoundationPosePipelinePackage> &package)
+bool FoundationPose::UploadDataToDevice(const cv::Mat     &rgb,
+                                        const cv::Mat     &depth,
+                                        const cv::Mat     &mask,
+                                        const ParsingType &package)
 {
   const int input_image_height = rgb.rows, input_image_width = rgb.cols;
   package->input_image_height = input_image_height;
@@ -297,7 +308,7 @@ bool FoundationPose::UploadDataToDevice(
   convert_depth_to_xyz_map(static_cast<float *>(depth_on_device), input_image_height,
                            input_image_width, static_cast<float *>(xyz_map_on_device),
                            intrinsic_(0, 0), intrinsic_(1, 1), intrinsic_(0, 2), intrinsic_(1, 2),
-                           0.1);
+                           0.001);
 
   // 输出device端指针，并注册析构过程
   auto func_release_cuda_buffer = [](void *ptr) {
@@ -314,11 +325,8 @@ bool FoundationPose::UploadDataToDevice(
   return true;
 }
 
-bool FoundationPose::RefinePreProcess(std::shared_ptr<async_pipeline::IPipelinePackage> _package)
+bool FoundationPose::RefinePreProcess(const ParsingType &package)
 {
-  auto package = std::dynamic_pointer_cast<FoundationPosePipelinePackage>(_package);
-  CHECK_STATE(package != nullptr, "[FoundationPose] RefinePreProcess Got INVALID package ptr!!!");
-
   // 1. sample
   if (package->hyp_poses.empty())
   {
@@ -329,17 +337,22 @@ bool FoundationPose::RefinePreProcess(std::shared_ptr<async_pipeline::IPipelineP
   }
 
   // 2. render
-  auto &refine_renderer     = map_name2renderer_[package->target_name];
-  auto  refiner_blob_buffer = refiner_core_->GetBuffer(false);
+  if (package->refiner_blobs_buffer == nullptr) {
+    package->refiner_blobs_buffer = refiner_core_->GetBuffer(true);
+  }
+  const auto& refiner_blob_buffer = package->refiner_blobs_buffer;
   // 设置推理前blob的输入位置为device，输出的blob位置为host端
   refiner_blob_buffer->SetBlobBuffer(RENDER_INPUT_BLOB_NAME, DataLocation::DEVICE);
   refiner_blob_buffer->SetBlobBuffer(TRANSF_INPUT_BLOB_NAME, DataLocation::DEVICE);
+
+  auto &refine_renderer     = map_name2renderer_[package->target_name];
   CHECK_STATE(
       refine_renderer->RenderAndTransform(
           package->hyp_poses, package->rgb_on_device.get(), package->depth_on_device.get(),
           package->xyz_map_on_device.get(), package->input_image_height, package->input_image_width,
           refiner_blob_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first,
-          refiner_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first),
+          refiner_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first,
+          refine_mode_crop_ratio_),
       "[FoundationPose] Failed to render and transform !!!");
   // 3. 设置推理时形状
   const int input_poses_num = package->hyp_poses.size();
@@ -347,22 +360,21 @@ bool FoundationPose::RefinePreProcess(std::shared_ptr<async_pipeline::IPipelineP
                                     {input_poses_num, crop_window_H_, crop_window_W_, 6});
   refiner_blob_buffer->SetBlobShape(TRANSF_INPUT_BLOB_NAME,
                                     {input_poses_num, crop_window_H_, crop_window_W_, 6});
-  package->refiner_blobs_buffer = refiner_blob_buffer;
   package->infer_buffer         = refiner_blob_buffer;
 
   return true;
 }
 
-bool FoundationPose::ScorePreprocess(std::shared_ptr<async_pipeline::IPipelinePackage> _package)
+bool FoundationPose::RefinePostProcess(const ParsingType &package)
 {
-  auto package = std::dynamic_pointer_cast<FoundationPosePipelinePackage>(_package);
-  CHECK_STATE(package != nullptr, "[FoundationPose] ScorePreprocess Got INVALID package ptr!!!");
   // 获取refiner模型的缓存指针
   const auto &refiner_blob_buffer = package->refiner_blobs_buffer;
   const auto _trans_ptr = refiner_blob_buffer->GetOuterBlobBuffer(REFINE_TRANS_OUT_BLOB_NAME).first;
   const auto _rot_ptr   = refiner_blob_buffer->GetOuterBlobBuffer(REFINE_ROT_OUT_BLOB_NAME).first;
   const float *trans_ptr = static_cast<float *>(_trans_ptr);
   const float *rot_ptr   = static_cast<float *>(_rot_ptr);
+  CHECK_STATE(trans_ptr != nullptr, "[FoundationPose] RefinePostProcess got invalid trans_ptr !");
+  CHECK_STATE(rot_ptr != nullptr, "[FoundationPose] RefinePostProcess got invalid rot_ptr !");
 
   // 获取生成的假设位姿
   const auto &hyp_poses = package->hyp_poses;
@@ -372,10 +384,12 @@ bool FoundationPose::ScorePreprocess(std::shared_ptr<async_pipeline::IPipelinePa
   const auto &mesh_loader = map_name2loaders_[package->target_name];
 
   // transformation 将模型输出的相对位姿转换为绝对位姿
-  const float                  mesh_diameter = mesh_loader->GetMeshDiameter();
+  const float mesh_diameter = mesh_loader->GetMeshDiameter();
+
   std::vector<Eigen::Vector3f> trans_delta(poses_num);
   std::vector<Eigen::Vector3f> rot_delta(poses_num);
   std::vector<Eigen::Matrix3f> rot_mat_delta(poses_num);
+
   for (int i = 0; i < poses_num; ++i)
   {
     const size_t offset = i * 3;
@@ -399,6 +413,12 @@ bool FoundationPose::ScorePreprocess(std::shared_ptr<async_pipeline::IPipelinePa
     refine_poses[i].block<3, 3>(0, 0) = result_3x3;
   }
 
+  package->hyp_poses = std::move(refine_poses);
+  return true;
+}
+
+bool FoundationPose::ScorePreprocess(const ParsingType &package)
+{
   auto scorer_blob_buffer = scorer_core_->GetBuffer(false);
   // 获取对应的score_renderer
   // 设置推理前后blob输出的位置，这里输入输出都在device端
@@ -408,85 +428,31 @@ bool FoundationPose::ScorePreprocess(std::shared_ptr<async_pipeline::IPipelinePa
   auto &score_renderer = map_name2renderer_[package->target_name];
   CHECK_STATE(
       score_renderer->RenderAndTransform(
-          refine_poses, package->rgb_on_device.get(), package->depth_on_device.get(),
+          package->hyp_poses, package->rgb_on_device.get(), package->depth_on_device.get(),
           package->xyz_map_on_device.get(), package->input_image_height, package->input_image_width,
           scorer_blob_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first,
-          scorer_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first),
+          scorer_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first,
+          score_mode_crop_ratio_),
       "[FoundationPose] score_renderer RenderAndTransform Failed!!!");
 
-  package->refine_poses        = std::move(refine_poses);
   package->scorer_blobs_buffer = scorer_blob_buffer;
   package->infer_buffer        = scorer_blob_buffer;
 
   return true;
 }
 
-bool FoundationPose::ScorePostProcess(std::shared_ptr<async_pipeline::IPipelinePackage> _package)
+bool FoundationPose::ScorePostProcess(const ParsingType &package)
 {
-  auto package = std::dynamic_pointer_cast<FoundationPosePipelinePackage>(_package);
-  CHECK_STATE(package != nullptr, "[FoundationPose] ScorePostProcess Got INVALID package ptr!!!");
   const auto &scorer_blob_buffer = package->scorer_blobs_buffer;
   // 获取scorer模型的输出缓存指针
   void *score_ptr = scorer_blob_buffer->GetOuterBlobBuffer(SCORE_OUTPUT_BLOB_NAME).first;
 
-  const auto &refine_poses = package->refine_poses;
+  const auto &refine_poses = package->hyp_poses;
   const int   poses_num    = refine_poses.size();
 
   // 获取置信度最大的refined_pose
   int max_score_index  = getMaxScoreIndex(nullptr, reinterpret_cast<float *>(score_ptr), poses_num);
   package->actual_pose = refine_poses[max_score_index];
-
-  return true;
-}
-
-bool FoundationPose::TrackPostProcess(std::shared_ptr<async_pipeline::IPipelinePackage> _package)
-{
-  auto package = std::dynamic_pointer_cast<FoundationPosePipelinePackage>(_package);
-  CHECK_STATE(package != nullptr, "[FoundationPose] TrackPostProcess Got INVALID package ptr!!!");
-
-  // 获取refiner模型的缓存指针
-  const auto &refiner_blob_buffer = package->refiner_blobs_buffer;
-  const auto _trans_ptr = refiner_blob_buffer->GetOuterBlobBuffer(REFINE_TRANS_OUT_BLOB_NAME).first;
-  const auto _rot_ptr   = refiner_blob_buffer->GetOuterBlobBuffer(REFINE_ROT_OUT_BLOB_NAME).first;
-  const float *trans_ptr = static_cast<float *>(_trans_ptr);
-  const float *rot_ptr   = static_cast<float *>(_rot_ptr);
-
-  // 获取生成的假设位姿
-  const auto &hyp_poses = package->hyp_poses;
-  const int   poses_num = hyp_poses.size();
-
-  // 获取对应的mesh_loader
-  const auto &mesh_loader = map_name2loaders_[package->target_name];
-
-  // transformation 将模型输出的相对位姿转换为绝对位姿
-  const float                  mesh_diameter = mesh_loader->GetMeshDiameter();
-  std::vector<Eigen::Vector3f> trans_delta(poses_num);
-  std::vector<Eigen::Vector3f> rot_delta(poses_num);
-  std::vector<Eigen::Matrix3f> rot_mat_delta(poses_num);
-  for (int i = 0; i < poses_num; ++i)
-  {
-    const size_t offset = i * 3;
-    trans_delta[i] << trans_ptr[offset], trans_ptr[offset + 1], trans_ptr[offset + 2];
-    trans_delta[i] *= mesh_diameter / 2;
-
-    rot_delta[i] << rot_ptr[offset], rot_ptr[offset + 1], rot_ptr[offset + 2];
-    auto normalized_vect = (rot_delta[i].array().tanh() * REFINE_ROT_NORMALIZER).matrix();
-    Eigen::AngleAxis rot_delta_angle_axis(normalized_vect.norm(), normalized_vect.normalized());
-    rot_mat_delta[i] = rot_delta_angle_axis.toRotationMatrix().transpose();
-  }
-
-  std::vector<Eigen::Matrix4f> refine_poses(poses_num);
-  for (int i = 0; i < poses_num; ++i)
-  {
-    refine_poses[i] = hyp_poses[i];
-    refine_poses[i].col(3).head(3) += trans_delta[i];
-
-    Eigen::Matrix3f top_left_3x3      = refine_poses[i].block<3, 3>(0, 0);
-    Eigen::Matrix3f result_3x3        = rot_mat_delta[i] * top_left_3x3;
-    refine_poses[i].block<3, 3>(0, 0) = result_3x3;
-  }
-
-  package->actual_pose = refine_poses[0];
 
   return true;
 }

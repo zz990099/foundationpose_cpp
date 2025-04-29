@@ -54,12 +54,8 @@ struct FoundationPosePipelinePackage : public async_pipeline::IPipelinePackage {
   std::shared_ptr<void> depth_on_device;
   // device端由depth转换得到的xyz_map
   std::shared_ptr<void> xyz_map_on_device;
-  // device端的输入mask缓存
-  // std::shared_ptr<void> mask_on_device;
   // 生成的假设位姿
   std::vector<Eigen::Matrix4f> hyp_poses;
-  // refine后的位姿
-  std::vector<Eigen::Matrix4f> refine_poses;
 
   // 保存refine阶段用的推理缓存
   std::shared_ptr<inference_core::IBlobsBuffer> refiner_blobs_buffer;

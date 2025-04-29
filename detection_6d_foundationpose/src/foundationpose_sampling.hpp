@@ -13,7 +13,6 @@ public:
   FoundationPoseSampler(const int              max_input_image_H,
                         const int              max_input_image_W,
                         const float            min_depth,
-                        const float            max_depth,
                         const Eigen::Matrix3f &intrinsic);
 
   bool GetHypPoses(void                         *_depth_on_device,
