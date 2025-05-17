@@ -58,16 +58,16 @@ struct FoundationPosePipelinePackage : public async_pipeline::IPipelinePackage {
   std::vector<Eigen::Matrix4f> hyp_poses;
 
   // 保存refine阶段用的推理缓存
-  std::shared_ptr<inference_core::IBlobsBuffer> refiner_blobs_buffer;
+  std::shared_ptr<inference_core::BlobsTensor> refiner_blobs_buffer;
   // 保存score阶段用的推理缓存
-  std::shared_ptr<inference_core::IBlobsBuffer> scorer_blobs_buffer;
+  std::shared_ptr<inference_core::BlobsTensor> scorer_blobs_buffer;
   // 保存用于推理的blob_buffer
-  std::shared_ptr<inference_core::IBlobsBuffer> infer_buffer;
+  inference_core::BlobsTensor* infer_buffer;
 
   // **最终输出的位姿** //
   Eigen::Matrix4f actual_pose;
 
-  std::shared_ptr<inference_core::IBlobsBuffer> GetInferBuffer()
+  inference_core::BlobsTensor* GetInferBuffer()
   {
     return infer_buffer;
   }
