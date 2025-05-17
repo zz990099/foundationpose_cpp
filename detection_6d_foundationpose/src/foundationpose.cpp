@@ -124,31 +124,18 @@ FoundationPose::FoundationPose(std::shared_ptr<inference_core::BaseInferCore>   
 {
   // Check
   auto refiner_blobs_buffer = refiner_core->GetBuffer(true);
-  if (refiner_blobs_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first == nullptr)
+  auto scorer_blobs_buffer  = scorer_core->GetBuffer(true);
+  try
   {
-    LOG(ERROR) << "[FoundationPose] Failed to Construct FoundationPose since `renfiner_core` "
-               << "do not has a blob named `" << RENDER_INPUT_BLOB_NAME << "`.";
-    throw std::runtime_error("[FoundationPose] Failed to Construct FoundationPose");
-  }
-  if (refiner_blobs_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first == nullptr)
+    refiner_blobs_buffer->GetTensor(RENDER_INPUT_BLOB_NAME);
+    refiner_blobs_buffer->GetTensor(TRANSF_INPUT_BLOB_NAME);
+    scorer_blobs_buffer->GetTensor(RENDER_INPUT_BLOB_NAME);
+    scorer_blobs_buffer->GetTensor(TRANSF_INPUT_BLOB_NAME);
+  } catch (const std::exception &e)
   {
-    LOG(ERROR) << "[FoundationPose] Failed to Construct FoundationPose since `renfiner_core` "
-               << "do not has a blob named `" << TRANSF_INPUT_BLOB_NAME << "`.";
-    throw std::runtime_error("[FoundationPose] Failed to Construct FoundationPose");
-  }
-
-  auto scorer_blobs_buffer = scorer_core->GetBuffer(true);
-  if (scorer_blobs_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first == nullptr)
-  {
-    LOG(ERROR) << "[FoundationPose] Failed to Construct FoundationPose since `scorer_core` "
-               << "do not has a blob named `" << RENDER_INPUT_BLOB_NAME << "`.";
-    throw std::runtime_error("[FoundationPose] Failed to Construct FoundationPose");
-  }
-  if (scorer_blobs_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first == nullptr)
-  {
-    LOG(ERROR) << "[FoundationPose] Failed to Construct FoundationPose since `scorer_core` "
-               << "do not has a blob named `" << TRANSF_INPUT_BLOB_NAME << "`.";
-    throw std::runtime_error("[FoundationPose] Failed to Construct FoundationPose");
+    LOG(ERROR) << "[FoundationPose] Failed to Construct FoundationPose, ex : " << e.what();
+    throw std::runtime_error("[FoundationPose] Failed to Construct FoundationPose, ex : " +
+                             std::string(e.what()));
   }
 
   // preload modules
@@ -210,7 +197,8 @@ bool FoundationPose::Register(const cv::Mat     &rgb,
   MESSURE_DURATION_AND_CHECK_STATE(UploadDataToDevice(rgb, depth, mask, package),
                                    "[FoundationPose] SyncDetect Failed to upload data!!!");
 
-  for (size_t i = 0 ; i < refine_itr ; ++ i) {
+  for (size_t i = 0; i < refine_itr; ++i)
+  {
     MESSURE_DURATION_AND_CHECK_STATE(
         RefinePreProcess(package),
         "[FoundationPose] SyncDetect Failed to execute RefinePreProcess!!!");
@@ -258,9 +246,10 @@ bool FoundationPose::Track(const cv::Mat         &rgb,
   MESSURE_DURATION_AND_CHECK_STATE(UploadDataToDevice(rgb, depth, cv::Mat(), package),
                                    "[FoundationPose] Track Failed to upload data!!!");
 
-  for (size_t i = 0 ; i < refine_itr ; ++ i) {
-    MESSURE_DURATION_AND_CHECK_STATE(RefinePreProcess(package),
-                                     "[FoundationPose] Track Failed to execute RefinePreProcess!!!");
+  for (size_t i = 0; i < refine_itr; ++i)
+  {
+    MESSURE_DURATION_AND_CHECK_STATE(
+        RefinePreProcess(package), "[FoundationPose] Track Failed to execute RefinePreProcess!!!");
 
     MESSURE_DURATION_AND_CHECK_STATE(
         refiner_core_->SyncInfer(package->GetInferBuffer()),
@@ -337,30 +326,33 @@ bool FoundationPose::RefinePreProcess(const ParsingType &package)
   }
 
   // 2. render
-  if (package->refiner_blobs_buffer == nullptr) {
+  if (package->refiner_blobs_buffer == nullptr)
+  {
     package->refiner_blobs_buffer = refiner_core_->GetBuffer(true);
   }
-  const auto& refiner_blob_buffer = package->refiner_blobs_buffer;
+  const auto &refiner_blobs_buffer = package->refiner_blobs_buffer;
   // 设置推理前blob的输入位置为device，输出的blob位置为host端
-  refiner_blob_buffer->SetBlobBuffer(RENDER_INPUT_BLOB_NAME, DataLocation::DEVICE);
-  refiner_blob_buffer->SetBlobBuffer(TRANSF_INPUT_BLOB_NAME, DataLocation::DEVICE);
+  refiner_blobs_buffer->GetTensor(RENDER_INPUT_BLOB_NAME)->SetBufferLocation(DataLocation::DEVICE);
+  refiner_blobs_buffer->GetTensor(TRANSF_INPUT_BLOB_NAME)->SetBufferLocation(DataLocation::DEVICE);
 
-  auto &refine_renderer     = map_name2renderer_[package->target_name];
+  auto &refine_renderer = map_name2renderer_[package->target_name];
   CHECK_STATE(
       refine_renderer->RenderAndTransform(
           package->hyp_poses, package->rgb_on_device.get(), package->depth_on_device.get(),
           package->xyz_map_on_device.get(), package->input_image_height, package->input_image_width,
-          refiner_blob_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first,
-          refiner_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first,
+          refiner_blobs_buffer->GetTensor(RENDER_INPUT_BLOB_NAME)->RawPtr(),
+          refiner_blobs_buffer->GetTensor(TRANSF_INPUT_BLOB_NAME)->RawPtr(),
           refine_mode_crop_ratio_),
       "[FoundationPose] Failed to render and transform !!!");
   // 3. 设置推理时形状
-  const int input_poses_num = package->hyp_poses.size();
-  refiner_blob_buffer->SetBlobShape(RENDER_INPUT_BLOB_NAME,
-                                    {input_poses_num, crop_window_H_, crop_window_W_, 6});
-  refiner_blob_buffer->SetBlobShape(TRANSF_INPUT_BLOB_NAME,
-                                    {input_poses_num, crop_window_H_, crop_window_W_, 6});
-  package->infer_buffer         = refiner_blob_buffer;
+  const size_t input_poses_num = package->hyp_poses.size();
+  refiner_blobs_buffer->GetTensor(RENDER_INPUT_BLOB_NAME)
+      ->SetShape({input_poses_num, static_cast<uint64_t>(crop_window_H_),
+                  static_cast<uint64_t>(crop_window_W_), 6});
+  refiner_blobs_buffer->GetTensor(TRANSF_INPUT_BLOB_NAME)
+      ->SetShape({input_poses_num, static_cast<uint64_t>(crop_window_H_),
+                  static_cast<uint64_t>(crop_window_W_), 6});
+  package->infer_buffer = refiner_blobs_buffer.get();
 
   return true;
 }
@@ -368,13 +360,9 @@ bool FoundationPose::RefinePreProcess(const ParsingType &package)
 bool FoundationPose::RefinePostProcess(const ParsingType &package)
 {
   // 获取refiner模型的缓存指针
-  const auto &refiner_blob_buffer = package->refiner_blobs_buffer;
-  const auto _trans_ptr = refiner_blob_buffer->GetOuterBlobBuffer(REFINE_TRANS_OUT_BLOB_NAME).first;
-  const auto _rot_ptr   = refiner_blob_buffer->GetOuterBlobBuffer(REFINE_ROT_OUT_BLOB_NAME).first;
-  const float *trans_ptr = static_cast<float *>(_trans_ptr);
-  const float *rot_ptr   = static_cast<float *>(_rot_ptr);
-  CHECK_STATE(trans_ptr != nullptr, "[FoundationPose] RefinePostProcess got invalid trans_ptr !");
-  CHECK_STATE(rot_ptr != nullptr, "[FoundationPose] RefinePostProcess got invalid rot_ptr !");
+  const auto &refiner_blobs_buffer = package->refiner_blobs_buffer;
+  const auto trans_ptr = refiner_blobs_buffer->GetTensor(REFINE_TRANS_OUT_BLOB_NAME)->Cast<float>();
+  const auto rot_ptr   = refiner_blobs_buffer->GetTensor(REFINE_ROT_OUT_BLOB_NAME)->Cast<float>();
 
   // 获取生成的假设位姿
   const auto &hyp_poses = package->hyp_poses;
@@ -419,39 +407,39 @@ bool FoundationPose::RefinePostProcess(const ParsingType &package)
 
 bool FoundationPose::ScorePreprocess(const ParsingType &package)
 {
-  auto scorer_blob_buffer = scorer_core_->GetBuffer(false);
+  auto scorer_blobs_buffer = scorer_core_->GetBuffer(false);
   // 获取对应的score_renderer
   // 设置推理前后blob输出的位置，这里输入输出都在device端
-  scorer_blob_buffer->SetBlobBuffer(RENDER_INPUT_BLOB_NAME, DataLocation::DEVICE);
-  scorer_blob_buffer->SetBlobBuffer(TRANSF_INPUT_BLOB_NAME, DataLocation::DEVICE);
-  scorer_blob_buffer->SetBlobBuffer(SCORE_OUTPUT_BLOB_NAME, DataLocation::DEVICE);
+  scorer_blobs_buffer->GetTensor(RENDER_INPUT_BLOB_NAME)->SetBufferLocation(DataLocation::DEVICE);
+  scorer_blobs_buffer->GetTensor(TRANSF_INPUT_BLOB_NAME)->SetBufferLocation(DataLocation::DEVICE);
+  scorer_blobs_buffer->GetTensor(SCORE_OUTPUT_BLOB_NAME)->SetBufferLocation(DataLocation::DEVICE);
+
   auto &score_renderer = map_name2renderer_[package->target_name];
   CHECK_STATE(
       score_renderer->RenderAndTransform(
           package->hyp_poses, package->rgb_on_device.get(), package->depth_on_device.get(),
           package->xyz_map_on_device.get(), package->input_image_height, package->input_image_width,
-          scorer_blob_buffer->GetOuterBlobBuffer(RENDER_INPUT_BLOB_NAME).first,
-          scorer_blob_buffer->GetOuterBlobBuffer(TRANSF_INPUT_BLOB_NAME).first,
-          score_mode_crop_ratio_),
+          scorer_blobs_buffer->GetTensor(RENDER_INPUT_BLOB_NAME)->RawPtr(),
+          scorer_blobs_buffer->GetTensor(TRANSF_INPUT_BLOB_NAME)->RawPtr(), score_mode_crop_ratio_),
       "[FoundationPose] score_renderer RenderAndTransform Failed!!!");
 
-  package->scorer_blobs_buffer = scorer_blob_buffer;
-  package->infer_buffer        = scorer_blob_buffer;
+  package->scorer_blobs_buffer = scorer_blobs_buffer;
+  package->infer_buffer        = scorer_blobs_buffer.get();
 
   return true;
 }
 
 bool FoundationPose::ScorePostProcess(const ParsingType &package)
 {
-  const auto &scorer_blob_buffer = package->scorer_blobs_buffer;
+  const auto &scorer_blobs_buffer = package->scorer_blobs_buffer;
   // 获取scorer模型的输出缓存指针
-  void *score_ptr = scorer_blob_buffer->GetOuterBlobBuffer(SCORE_OUTPUT_BLOB_NAME).first;
+  const auto score_ptr = scorer_blobs_buffer->GetTensor(SCORE_OUTPUT_BLOB_NAME)->Cast<float>();
 
   const auto &refine_poses = package->hyp_poses;
   const int   poses_num    = refine_poses.size();
 
   // 获取置信度最大的refined_pose
-  int max_score_index  = getMaxScoreIndex(nullptr, reinterpret_cast<float *>(score_ptr), poses_num);
+  int max_score_index  = getMaxScoreIndex(nullptr, score_ptr, poses_num);
   package->actual_pose = refine_poses[max_score_index];
 
   return true;
