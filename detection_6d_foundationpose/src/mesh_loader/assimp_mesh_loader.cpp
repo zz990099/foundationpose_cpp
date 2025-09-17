@@ -88,28 +88,33 @@ static void ComputeOBB(const aiMesh    *mesh,
 
   // 特征分解
   Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(cov);
-  Eigen::Matrix3f                                rotation = solver.eigenvectors();
-  Eigen::Vector3f                                extents  = solver.eigenvalues().cwiseSqrt();
-  // 生成变换矩阵
-  Eigen::Matrix4f transform   = Eigen::Matrix4f::Identity();
-  transform.block<3, 3>(0, 0) = rotation;
-  transform.block<3, 1>(0, 3) = mean;
-
+  Eigen::Matrix3f rotation = solver.eigenvectors();
+  Eigen::Vector3f extents  = solver.eigenvalues().cwiseSqrt();
+  
+  // 将顶点变换到旋转后的坐标系
   Eigen::MatrixXf transformed(vertices.size(), 3);
   for (int i = 0; i < vertices.size(); ++i)
   {
-    Eigen::Vector3f proj = rotation.transpose() * vertices[i];
-    transformed(i, 0)    = proj(0);
-    transformed(i, 1)    = proj(1);
-    transformed(i, 2)    = proj(2);
+    Eigen::Vector3f proj = rotation.transpose() * (vertices[i] - mean);
+    transformed(i, 0) = proj(0);
+    transformed(i, 1) = proj(1);
+    transformed(i, 2) = proj(2);
   }
 
+  // 计算边界框
   Eigen::Vector3f minBound = transformed.colwise().minCoeff();
   Eigen::Vector3f maxBound = transformed.colwise().maxCoeff();
-
   Eigen::Vector3f dimension = maxBound - minBound;
+  
+  // 计算OBB中心（在旋转后的坐标系中）
+  Eigen::Vector3f center = (minBound + maxBound) / 2.0f;
+  
+  // 构建变换矩阵：从OBB坐标系到模型坐标系
+  Eigen::Matrix4f to_origin = Eigen::Matrix4f::Identity();
+  to_origin.block<3, 3>(0, 0) = rotation;
+  to_origin.block<3, 1>(0, 3) = rotation * center + mean;
 
-  out_orient_bbox = transform;
+  out_orient_bbox = to_origin;
   out_dimension   = dimension;
 }
 
