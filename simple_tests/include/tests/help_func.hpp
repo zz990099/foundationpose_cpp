@@ -64,8 +64,10 @@ inline void draw3DBoundingBox(const Eigen::Matrix3f &intrinsic,
   float h = dimension(2) / 2;
 
   // 目标的八个顶点在物体坐标系中的位置
-  Eigen::Vector3f points[8] = {{-l, -w, h},  {l, -w, h},  {l, w, h},  {-l, w, h},
-                               {-l, -w, -h}, {l, -w, -h}, {l, w, -h}, {-l, w, -h}};
+  Eigen::Vector3f points[8] = {
+      {-l, -w, h},  {l, -w, h},   {l, w, h},   {-l, w, h},
+      {-l, -w, -h}, {l, -w, -h},  {l, w, -h},  {-l, w, -h}
+  };
 
   // 变换到世界坐标系
   Eigen::Vector4f transformed_points[8];
@@ -99,9 +101,45 @@ inline void draw3DBoundingBox(const Eigen::Matrix3f &intrinsic,
   {
     if (edge.first < image_points.size() && edge.second < image_points.size())
     {
-      cv::line(image, image_points[edge.first], image_points[edge.second], cv::Scalar(0, 255, 0),
-               2); // 绿色边框
+      cv::line(image, image_points[edge.first], image_points[edge.second], cv::Scalar(0, 255, 0), 2); // 绿色边框
     }
+  }
+
+  // 计算物体中心在世界坐标系中的位置
+  Eigen::Vector4f center_obj(0, 0, 0, 1);  // 物体坐标系中心原点
+  Eigen::Vector4f center_world = pose * center_obj;
+
+  // 定义三个轴的终点
+  float axis_length = (dimension(0) + dimension(1) + dimension(2)) / 6;
+  Eigen::Vector4f x_end_obj(axis_length, 0, 0, 1);
+  Eigen::Vector4f y_end_obj(0, axis_length, 0, 1);
+  Eigen::Vector4f z_end_obj(0, 0, axis_length, 1);
+
+  Eigen::Vector4f x_end_world = pose * x_end_obj;
+  Eigen::Vector4f y_end_world = pose * y_end_obj;
+  Eigen::Vector4f z_end_world = pose * z_end_obj;
+
+  std::vector<Eigen::Vector4f> axis_end_points = {x_end_world, y_end_world, z_end_world};
+  std::vector<cv::Scalar> axis_colors = {
+      cv::Scalar(0, 0, 255),     // X轴: 红色
+      cv::Scalar(0, 255, 0),     // Y轴: 绿色
+      cv::Scalar(255, 0, 0)      // Z轴: 蓝色
+  };
+
+  float cx = center_world(0) / center_world(2);
+  float cy = center_world(1) / center_world(2);
+  float cu = intrinsic(0, 0) * cx + intrinsic(0, 2);
+  float cv = intrinsic(1, 1) * cy + intrinsic(1, 2);
+  cv::Point center_pt(cu, cv);
+
+  for (int k = 0; k < 3; ++k)
+  {
+    float ex = axis_end_points[k](0) / axis_end_points[k](2);
+    float ey = axis_end_points[k](1) / axis_end_points[k](2);
+    float eu = intrinsic(0, 0) * ex + intrinsic(0, 2);
+    float ev = intrinsic(1, 1) * ey + intrinsic(1, 2);
+
+    cv::line(image, center_pt, cv::Point(eu, ev), axis_colors[k], 3);
   }
 }
 
