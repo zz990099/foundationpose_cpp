@@ -90,7 +90,7 @@ static void ComputeOBB(const aiMesh    *mesh,
   Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> solver(cov);
   Eigen::Matrix3f rotation = solver.eigenvectors();
   Eigen::Vector3f extents  = solver.eigenvalues().cwiseSqrt();
-  
+
   // 将顶点变换到旋转后的坐标系
   Eigen::MatrixXf transformed(vertices.size(), 3);
   for (int i = 0; i < vertices.size(); ++i)
@@ -105,10 +105,10 @@ static void ComputeOBB(const aiMesh    *mesh,
   Eigen::Vector3f minBound = transformed.colwise().minCoeff();
   Eigen::Vector3f maxBound = transformed.colwise().maxCoeff();
   Eigen::Vector3f dimension = maxBound - minBound;
-  
+
   // 计算OBB中心（在旋转后的坐标系中）
   Eigen::Vector3f center = (minBound + maxBound) / 2.0f;
-  
+
   // 构建变换矩阵：从OBB坐标系到模型坐标系
   Eigen::Matrix4f to_origin = Eigen::Matrix4f::Identity();
   to_origin.block<3, 3>(0, 0) = rotation;
